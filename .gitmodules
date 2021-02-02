@@ -1,0 +1,6 @@
+[submodule "TS-Interpretability-Benchmark"]
+	path = TS-Interpretability-Benchmark
+	url = git@github.com:cjrooke/TS-Interpretability-Benchmark.git
+[submodule "time_series_explainability"]
+	path = time_series_explainability
+	url = git@github.com:cjrooke/time_series_explainability.git
