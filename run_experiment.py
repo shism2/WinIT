@@ -1,4 +1,4 @@
-import os
+import pathlib
 
 import torch
 from torch.utils.data import TensorDataset, DataLoader
@@ -15,6 +15,26 @@ from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTM import LSTM
 from TSR.Scripts.Models.TCN import TCN
+
+
+class MockFitGenerator:
+    def eval(self):
+        pass
+
+    def to(self, device):
+        pass
+
+    def get_sample(self, shape):
+        return torch.zeros(shape)
+
+    def forward_conditional(self, past, current, sig_inds):
+        """AFAIK, sig_inds is a list of feature indices, and we want to mask all BUT those features"""
+        sig_inds_comp = list(set(range(past.shape[-2]))-set(sig_inds))
+        if len(current.shape) == 1:
+            current = current.unsqueeze(0)
+        full_sample = current.clone()
+        full_sample[:, sig_inds_comp] = self.get_sample([full_sample.shape[0], len(sig_inds_comp)])
+        return full_sample, None
 
 
 def generate_data(num_samples, num_features, num_timesteps, batch_size, trainer_type):
@@ -40,14 +60,18 @@ def generate_data(num_samples, num_features, num_timesteps, batch_size, trainer_
     return tsr_loader, fit_loader, ground_truth_importance
 
 
-def get_fit_attributions(model, train_loader, test_loader, num_features, train):
-    generator = JointFeatureGenerator(num_features, latent_size=100, data='top_level_experiment')
-    if train:
-        FIT = FITExplainer(model, ft_dim_last=False)
-        FIT.fit_generator(generator, train_loader, test_loader, n_epochs=50)
-    else:
-        generator.load_state_dict(torch.load('ckpt/top_level_experiment/joint_generator_0.pt'))
+def get_fit_attributions(model, train_loader, test_loader, num_features, train, mock_generator):
+    if mock_generator:
+        generator = MockFitGenerator()
         FIT = FITExplainer(model, generator=generator, ft_dim_last=False)
+    else:
+        generator = JointFeatureGenerator(num_features, latent_size=100, data='top_level_experiment')
+        if train:
+            FIT = FITExplainer(model, ft_dim_last=False)
+            FIT.fit_generator(generator, train_loader, test_loader, n_epochs=50)
+        else:
+            generator.load_state_dict(torch.load('ckpt/top_level_experiment/joint_generator_0.pt'))
+            FIT = FITExplainer(model, generator=generator, ft_dim_last=False)
 
     fit_attributions = []
 
@@ -69,10 +93,14 @@ def get_tsr_attributions(saliency, test_loader):
 def main():
     # Modify these
     train = True
-    trainer_type = "TSR"
+    trainer_type = "FIT"
+
+    # model_path = "Models/TCN/top_level_experiment_BEST.pkl"
     model_path = "ckpt/simulation/top_level_experiment_0.pt"
 
     methods = ['grad_tsr', 'fit']
+
+    mock_fit_generator = False
 
     train_samples = 1000
     test_samples = 100
@@ -108,7 +136,7 @@ def main():
 
     for method in methods:
         if method == 'fit':
-            attributions = get_fit_attributions(model, train_tsr_loader, test_tsr_loader, num_features, train)
+            attributions = get_fit_attributions(model, train_tsr_loader, test_tsr_loader, num_features, train, mock_fit_generator)
         elif method == 'grad_tsr':
             attributions = get_tsr_attributions(Saliency(model), test_tsr_loader)
         else:
@@ -118,6 +146,8 @@ def main():
         aupr_score = metrics.average_precision_score(test_gt.flatten(), attributions.flatten())
 
         print(method, 'auc:', auc_score, ' aupr:', aupr_score)
+
+        pathlib.Path('experiment_plots').mkdir(parents=True, exist_ok=True)
 
         for i in range(10):
             plotExampleBox(attributions[i], f'experiment_plots/{method}_{i}',greyScale=True)
