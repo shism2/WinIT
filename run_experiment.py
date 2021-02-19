@@ -102,8 +102,10 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, moc
 
     assert trainer_type in ("TSR", "FIT")
 
+    if mock_fit_generator and method == 'fit':
+        print(f"Running {experiment['name']} with mock FIT generator")
+
     method_name = f"{method}_TrainerType_{trainer_type}"
-    run_name = f"{experiment['name']}_{method_name}"
     model_path = f"Models/TCN/{experiment['name']}_BEST.pkl" if trainer_type == "TSR" else f"ckpt/simulation/{experiment['name']}_0.pt"
 
     num_features = experiment['num_features']
@@ -157,7 +159,7 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, moc
     metrics_file_exists = os.path.exists(metrics_file)
     with open(metrics_file, 'a') as file:
         if not metrics_file_exists:
-            file.write(", AUC, AUPR\n")
+            file.write(f"{experiment['name']}, AUC, AUPR\n")
         file.write(f"{method_name}, {auc_score}, {aupr_score}\n")
 
     for i in range(10):
@@ -200,16 +202,41 @@ def basic_rare_time(num_features, num_timesteps, noise_mean=0, signal_mean=2, mo
     }
 
 
+def basic_rare_feature(num_features, num_timesteps, noise_mean=0, signal_mean=2, moving=False):
+    def get_importance_map(shape):
+        assert len(shape) == 2, f"Importance maps are size (num_features, num_timesteps)"
+        num_features, num_timesteps = shape
+
+        importance_map = np.zeros(shape, dtype=bool)
+        if moving:
+            imp_ft = np.random.randint(0, num_features)
+            importance_map[imp_ft, :] = True
+        else:
+            imp_ft = num_features // 2
+            importance_map[imp_ft, :] = True
+        return importance_map
+
+    return {
+        'name': f'{"Moving" if moving else ""}GaussianRareFeature_{noise_mean}_{signal_mean}',
+        'num_features': num_features,
+        'num_timesteps': num_timesteps,
+        'noise': lambda shape: np.random.normal(noise_mean, 1, shape),
+        'signal': lambda shape: np.random.normal(signal_mean, 1, shape),
+        'importance_map': get_importance_map
+    }
+
+
 if __name__ == '__main__':
     np.random.seed(0)
     torch.manual_seed(0)
 
     # Change these to run different experiments
-    experiments = [basic_rare_time(20, 20, noise_mean=10, moving=True)]
+    experiments = [basic_rare_time(20, 20, signal_mean=10, moving=True)]
     methods = ['grad_tsr', 'fit']
     trainer_types = ['TSR', 'FIT']
     train = True
     train_generator = True
+    mock_fit_generator = False
     reset_metrics_file = True
 
     for i, experiment in enumerate(experiments):
@@ -220,4 +247,4 @@ if __name__ == '__main__':
                 reset_metrics_now = reset_metrics_file and j == 0 and k == 0
 
                 run_experiment(experiment, method, trainer_type, train_now, train_generator_now,
-                               reset_metrics_file=reset_metrics_now)
+                               mock_fit_generator=mock_fit_generator, reset_metrics_file=reset_metrics_now)
