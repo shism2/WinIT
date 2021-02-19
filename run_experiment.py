@@ -6,6 +6,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 from sklearn import metrics
 from captum.attr import Saliency
+import timesynth as ts
 
 from FIT.TSX.models import StateClassifier
 from FIT.TSX.utils import train_model_rt
@@ -44,25 +45,21 @@ def generate_data(experiment, num_samples, batch_size, trainer_type):
     num_features = experiment['num_features']
     num_timesteps = experiment['num_timesteps']
 
-    data = experiment['noise']((num_samples, num_features, num_timesteps))
-    signal = experiment['signal']((num_samples, num_features, num_timesteps))
-    labels = np.random.choice((0, 1), num_samples)
-
+    data = np.zeros((num_samples, num_features, num_timesteps))
     ground_truth_importance = np.zeros((num_samples, num_features, num_timesteps))
+    labels = np.random.choice((0, 1), num_samples)
     labels_in_time = np.zeros((num_samples, num_timesteps))
 
     for i in range(num_samples):
-        if labels[i]:
-            ground_truth_importance[i] = experiment['importance_map']((num_features, num_timesteps))
+        data[i], ground_truth_importance[i] = experiment['generate_sample']((num_features, num_timesteps), labels[i])
+        if np.any(ground_truth_importance[i]):
             first_important_timestep = np.min(np.argwhere(ground_truth_importance[i])[:, 1])
             labels_in_time[i, first_important_timestep:] = 1
-
-    data[np.argwhere(ground_truth_importance)] = signal[np.argwhere(ground_truth_importance)]
 
     data = torch.from_numpy(data).float() if trainer_type == "FIT" else torch.from_numpy(data).double()
     tsr_loader = DataLoader(TensorDataset(data, torch.from_numpy(labels)), batch_size=batch_size)
     fit_loader = DataLoader(TensorDataset(data, torch.from_numpy(labels_in_time)), batch_size=batch_size)
-    return tsr_loader, fit_loader, ground_truth_importance
+    return tsr_loader, fit_loader, data, ground_truth_importance
 
 
 def get_fit_attributions(model, train_loader, test_loader, num_features, name, train, mock_generator):
@@ -95,15 +92,14 @@ def get_tsr_attributions(saliency, test_loader):
     return tsr_attributions
 
 
-def run_experiment(experiment, method, trainer_type, train, train_generator, mock_fit_generator=False, reset_metrics_file=False):
-    train_samples = 1000
-    test_samples = 100
+def run_experiment(experiment, method, trainer_type, train, train_generator, reset_metrics_file=False):
+    train_samples = 500
+    test_samples = 50
     batch_size = 10
 
     assert trainer_type in ("TSR", "FIT")
 
-    if mock_fit_generator and method == 'fit':
-        print(f"Running {experiment['name']} with mock FIT generator")
+    print(f"Running {experiment['name']} with {method} and trainer type {trainer_type}")
 
     method_name = f"{method}_TrainerType_{trainer_type}"
     model_path = f"Models/TCN/{experiment['name']}_BEST.pkl" if trainer_type == "TSR" else f"ckpt/simulation/{experiment['name']}_0.pt"
@@ -113,9 +109,14 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, moc
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    train_tsr_loader, train_fit_loader, train_gt = \
+    mock_fit_generator = False
+    if method == 'mock_fit':
+        method = 'fit'
+        mock_fit_generator = True
+
+    train_tsr_loader, train_fit_loader, train_data, train_gt = \
         generate_data(experiment, train_samples, batch_size, trainer_type)
-    test_tsr_loader, test_fit_loader, test_gt = \
+    test_tsr_loader, test_fit_loader, test_data, test_gt = \
         generate_data(experiment, test_samples, batch_size, trainer_type)
 
     if trainer_type == "FIT":
@@ -165,6 +166,7 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, moc
     for i in range(10):
         plotExampleBox(attributions[i], f'{plots_path}/{method_name}_{i}',greyScale=True)
         plotExampleBox(test_gt[i], f'{plots_path}/gt_{i}',greyScale=True)
+        plotExampleBox(test_data[i], f'{plots_path}/data_{i}',greyScale=True)
 
 
 """
@@ -172,57 +174,99 @@ Experiments need
 - 'name': str - identifier
 - 'num_features': int
 - 'num_timesteps': int
-- 'noise': function(shape) - returns np array of size shape of background noise 
-- 'signal': function(shape) - returns np array of size shape of 'important' data
-- 'importance_map': function(shape) - returns a boolean np array where True values are 'important'
+- 'generate_sample': function(shape, label) - returns (sample, boolean importance map)
 """
 
 
-def basic_rare_time(num_features, num_timesteps, noise_mean=0, signal_mean=2, moving=False):
-    def get_importance_map(shape):
-        assert len(shape) == 2, f"Importance maps are size (num_features, num_timesteps)"
+def generate_TSR_sample(num_features, num_timesteps, generation_type, sampler="irregular", has_noise=False):
+    if generation_type == "Gaussian":
+        return np.random.normal(0, 1, (num_features, num_timesteps))
+
+    time_sampler = ts.TimeSampler(stop_time=20)
+    sample = np.zeros([num_features, num_timesteps])
+
+    if sampler == "regular":
+        time = time_sampler.sample_regular_time(num_points=num_timesteps * 2, keep_percentage=50)
+    else:
+        time = time_sampler.sample_irregular_time(num_points=num_timesteps * 2, keep_percentage=50)
+
+    for i in range(num_features):
+        if generation_type == "Harmonic":
+            signal = ts.signals.Sinusoidal(frequency=2.0)
+
+        elif generation_type == "GaussianProcess":
+            signal = ts.signals.GaussianProcess(kernel="Matern", nu=3. / 2)
+
+        elif generation_type == "PseudoPeriodic":
+            signal = ts.signals.PseudoPeriodic(frequency=2.0, freqSD=0.01, ampSD=0.5)
+
+        elif generation_type == "AutoRegressive":
+            signal = ts.signals.AutoRegressive(ar_param=[0.9])
+
+        elif generation_type == "CAR":
+            signal = ts.signals.CAR(ar_param=0.9, sigma=0.01)
+
+        elif generation_type == "NARMA":
+            signal = ts.signals.NARMA(order=10)
+
+        if has_noise:
+            noise = ts.noise.GaussianNoise(std=0.3)
+            timeseries = ts.TimeSeries(signal, noise_generator=noise)
+        else:
+            timeseries = ts.TimeSeries(signal)
+
+        feature, signals, errors = timeseries.sample(time)
+        sample[i, :] = feature
+    return sample
+
+
+def basic_spike(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2):
+    def generate_spike_sample(shape, label):
+        assert len(shape) == 2
         num_features, num_timesteps = shape
 
         importance_map = np.zeros(shape, dtype=bool)
-        if moving:
+        data = generate_TSR_sample(num_features, num_timesteps, generation_type) + noise_mean
+
+        if label:
             imp_ts = np.random.randint(0, num_timesteps)
-            importance_map[:, imp_ts] = True
-        else:
-            imp_ts = num_timesteps // 2
-            importance_map[:, imp_ts] = True
-        return importance_map
+            imp_ft = np.random.randint(0, num_features)
+            importance_map[imp_ft, imp_ts] = True
+            data[imp_ft, imp_ts] += signal_mean - noise_mean
+
+        return data, importance_map
 
     return {
-        'name': f'{"Moving" if moving else ""}GaussianRareTime_{noise_mean}_{signal_mean}',
+        'name': f'Moving{generation_type}Spike{noise_mean}_{signal_mean}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
-        'noise': lambda shape: np.random.normal(noise_mean, 1, shape),
-        'signal': lambda shape: np.random.normal(signal_mean, 1, shape),
-        'importance_map': get_importance_map
+        'generate_sample': generate_spike_sample
     }
 
 
-def basic_rare_feature(num_features, num_timesteps, noise_mean=0, signal_mean=2, moving=False):
-    def get_importance_map(shape):
-        assert len(shape) == 2, f"Importance maps are size (num_features, num_timesteps)"
+def basic_rare_time(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2, moving=False):
+    def generate_raretime_sample(shape, label):
+        assert len(shape) == 2
         num_features, num_timesteps = shape
 
         importance_map = np.zeros(shape, dtype=bool)
-        if moving:
-            imp_ft = np.random.randint(0, num_features)
-            importance_map[imp_ft, :] = True
-        else:
-            imp_ft = num_features // 2
-            importance_map[imp_ft, :] = True
-        return importance_map
+        data = generate_TSR_sample(num_features, num_timesteps, generation_type) + noise_mean
+
+        if label:
+            if moving:
+                imp_ts = np.random.randint(0, num_timesteps)
+            else:
+                imp_ts = num_timesteps // 2
+            importance_map[:, imp_ts] = True
+            data[:, imp_ts] += signal_mean - noise_mean
+
+        return data, importance_map
 
     return {
-        'name': f'{"Moving" if moving else ""}GaussianRareFeature_{noise_mean}_{signal_mean}',
+        'name': f'{"Moving" if moving else ""}{generation_type}RareTime_{noise_mean}_{signal_mean}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
-        'noise': lambda shape: np.random.normal(noise_mean, 1, shape),
-        'signal': lambda shape: np.random.normal(signal_mean, 1, shape),
-        'importance_map': get_importance_map
+        'generate_sample': generate_raretime_sample
     }
 
 
@@ -231,12 +275,14 @@ if __name__ == '__main__':
     torch.manual_seed(0)
 
     # Change these to run different experiments
-    experiments = [basic_rare_time(20, 20, signal_mean=10, moving=True)]
-    methods = ['grad_tsr', 'fit']
+    generation_types = ["Gaussian"]
+    experiments = []
+    for generation_type in generation_types:
+        experiments.append(basic_rare_time(20, 20, generation_type=generation_type, moving=True, signal_mean=10))
+    methods = ['tsr', 'mock_fit', 'fit']
     trainer_types = ['TSR', 'FIT']
     train = True
     train_generator = True
-    mock_fit_generator = False
     reset_metrics_file = True
 
     for i, experiment in enumerate(experiments):
@@ -246,5 +292,4 @@ if __name__ == '__main__':
                 train_generator_now = train_generator and j == 0
                 reset_metrics_now = reset_metrics_file and j == 0 and k == 0
 
-                run_experiment(experiment, method, trainer_type, train_now, train_generator_now,
-                               mock_fit_generator=mock_fit_generator, reset_metrics_file=reset_metrics_now)
+                run_experiment(experiment, method, trainer_type, train_now, train_generator_now, reset_metrics_file=reset_metrics_now)
