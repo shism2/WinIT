@@ -270,16 +270,42 @@ def basic_rare_time(num_features, num_timesteps, generation_type="Gaussian", noi
     }
 
 
+def basic_rare_feature(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2, moving=False):
+    def generate_rarefeature_sample(shape, label):
+        assert len(shape) == 2
+        num_features, num_timesteps = shape
+
+        importance_map = np.zeros(shape, dtype=bool)
+        data = generate_TSR_sample(num_features, num_timesteps, generation_type) + noise_mean
+
+        if label:
+            if moving:
+                imp_ft = np.random.randint(0, num_features)
+            else:
+                imp_ft = num_features // 2
+            importance_map[imp_ft, :] = True
+            data[imp_ft, :] += signal_mean - noise_mean
+
+        return data, importance_map
+
+    return {
+        'name': f'{"Moving" if moving else ""}{generation_type}RareFeature_{noise_mean}_{signal_mean}',
+        'num_features': num_features,
+        'num_timesteps': num_timesteps,
+        'generate_sample': generate_rarefeature_sample
+    }
+
+
 if __name__ == '__main__':
     np.random.seed(0)
     torch.manual_seed(0)
 
     # Change these to run different experiments
-    generation_types = ["Gaussian"]
+    generation_types = ["Gaussian", "AutoRegressive", "CAR", "GaussianProcess", "Harmonic", "NARMA", "PseudoPeriodic"]
     experiments = []
     for generation_type in generation_types:
-        experiments.append(basic_rare_time(20, 20, generation_type=generation_type, moving=True, signal_mean=10))
-    methods = ['tsr', 'mock_fit', 'fit']
+        experiments.append(basic_rare_feature(20, 20, generation_type=generation_type, moving=True, signal_mean=10))
+    methods = ['grad_tsr', 'mock_fit', 'fit']
     trainer_types = ['TSR', 'FIT']
     train = True
     train_generator = True
