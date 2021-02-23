@@ -17,6 +17,7 @@ from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTM import LSTM
 from TSR.Scripts.Models.TCN import TCN
+from inverse_fit import inverse_fit_attribute
 
 
 class MockFitGenerator:
@@ -92,6 +93,14 @@ def get_tsr_attributions(saliency, test_loader):
     return tsr_attributions
 
 
+def get_inverse_fit_attributions(model, test_loader):
+    ifit_attributions = []
+    for x, _ in test_loader:
+        ifit_attributions.append(inverse_fit_attribute(x, model))
+    ifit_attributions = np.concatenate(ifit_attributions, 0)
+    return ifit_attributions
+
+
 def run_experiment(experiment, method, trainer_type, train, train_generator, reset_metrics_file=False):
     train_samples = 500
     test_samples = 50
@@ -142,8 +151,12 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
                                             experiment['name'], train_generator, mock_fit_generator)
     elif method == 'grad_tsr':
         attributions = get_tsr_attributions(Saliency(model), test_tsr_loader)
+    elif method == 'inverse_fit':
+        attributions = get_inverse_fit_attributions(model, test_tsr_loader)
     else:
         raise Exception(f"Method {method} unrecognized")
+
+    attributions = np.nan_to_num(attributions)
 
     auc_score = metrics.roc_auc_score(test_gt.flatten(), attributions.flatten())
     aupr_score = metrics.average_precision_score(test_gt.flatten(), attributions.flatten())
@@ -305,7 +318,7 @@ if __name__ == '__main__':
     experiments = []
     for generation_type in generation_types:
         experiments.append(basic_rare_feature(20, 20, generation_type=generation_type, moving=True, signal_mean=10))
-    methods = ['grad_tsr', 'mock_fit', 'fit']
+    methods = ['grad_tsr', 'mock_fit', 'inverse_fit', 'fit']
     trainer_types = ['TSR', 'FIT']
     train = True
     train_generator = True
