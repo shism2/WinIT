@@ -64,17 +64,18 @@ def generate_data(experiment, num_samples, batch_size, trainer_type):
 
 
 def get_fit_attributions(model, train_loader, test_loader, num_features, name, train, mock_generator):
+    activation = torch.nn.Softmax(-1) if trainer_type == "FIT" else lambda x: x
     if mock_generator:
         generator = MockFitGenerator()
-        FIT = FITExplainer(model, generator=generator, ft_dim_last=False)
+        FIT = FITExplainer(model, generator=generator, ft_dim_last=False, activation=activation)
     else:
         generator = JointFeatureGenerator(num_features, latent_size=100, data=name)
         if train:
-            FIT = FITExplainer(model, ft_dim_last=False)
+            FIT = FITExplainer(model, ft_dim_last=False, activation=activation)
             FIT.fit_generator(generator, train_loader, test_loader, n_epochs=50)
         else:
             generator.load_state_dict(torch.load(f'ckpt/{name}/joint_generator_0.pt'))
-            FIT = FITExplainer(model, generator=generator, ft_dim_last=False)
+            FIT = FITExplainer(model, generator=generator, ft_dim_last=False, activation=activation)
 
     fit_attributions = []
 
@@ -93,10 +94,11 @@ def get_tsr_attributions(saliency, test_loader):
     return tsr_attributions
 
 
-def get_inverse_fit_attributions(model, test_loader):
+def get_inverse_fit_attributions(model, test_loader, trainer_type):
+    activation = torch.nn.Softmax(-1) if trainer_type == "FIT" else None
     ifit_attributions = []
     for x, _ in test_loader:
-        ifit_attributions.append(inverse_fit_attribute(x, model))
+        ifit_attributions.append(inverse_fit_attribute(x, model, activation))
     ifit_attributions = np.concatenate(ifit_attributions, 0)
     return ifit_attributions
 
@@ -152,7 +154,7 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
     elif method == 'grad_tsr':
         attributions = get_tsr_attributions(Saliency(model), test_tsr_loader)
     elif method == 'inverse_fit':
-        attributions = get_inverse_fit_attributions(model, test_tsr_loader)
+        attributions = get_inverse_fit_attributions(model, test_tsr_loader, trainer_type)
     else:
         raise Exception(f"Method {method} unrecognized")
 
@@ -175,6 +177,8 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
         if not metrics_file_exists:
             file.write(f"{experiment['name']}, AUC, AUPR\n")
         file.write(f"{method_name}, {auc_score}, {aupr_score}\n")
+
+    print(f"{experiment['name']}: AUC {auc_score}, AUPR {aupr_score}\n")
 
     for i in range(10):
         plotExampleBox(attributions[i], f'{plots_path}/{method_name}_{i}',greyScale=True)
