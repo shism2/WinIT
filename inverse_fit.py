@@ -9,6 +9,8 @@ def inverse_fit_attribute(x, model, activation=None):
         else:
             return model(x)
 
+    model.eval()
+
     batch_size, num_features, num_timesteps = x.shape
     score = torch.zeros(x.shape)
 
