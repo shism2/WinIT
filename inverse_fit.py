@@ -18,7 +18,7 @@ def inverse_fit_attribute(x, model, activation=None):
         p_y = model_predict(x[:, :, :t + 1])
         for f in range(num_features):
             x_hat = x[:, :, :t + 1].clone()
-            x_hat[:, f, -1] = x[0, 0, 0]
+            x_hat[:, f, -1] = torch.mean(x)
             p_y_hat = model_predict(x_hat)
             div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
             score[:, f, t] = 2. / (1 + torch.exp(-5 * div)) - 1

@@ -143,7 +143,7 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
             num_chans = [5] * (3 - 1) + [num_timesteps]
             model = TCN(num_features, 2, num_chans, 4, 0.1, ft_dim_last=False).to(device)
             train_model(model, "TCN", experiment['name'], torch.nn.CrossEntropyLoss(), train_tsr_loader, test_tsr_loader, device,
-                        num_timesteps, num_features, 500, experiment['name'], 0.01)
+                        num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
     else:
         raise Exception(f"Trainer type {trainer_type} unrecognized")
@@ -261,7 +261,8 @@ def basic_spike(num_features, num_timesteps, generation_type="Gaussian", noise_m
     }
 
 
-def basic_rare_time(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2, moving=False):
+def basic_rare_time(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2, moving=False,
+                    posneg=False):
     def generate_raretime_sample(shape, label):
         assert len(shape) == 2
         num_features, num_timesteps = shape
@@ -269,25 +270,26 @@ def basic_rare_time(num_features, num_timesteps, generation_type="Gaussian", noi
         importance_map = np.zeros(shape, dtype=bool)
         data = generate_TSR_sample(num_features, num_timesteps, generation_type) + noise_mean
 
-        if label:
+        if label or posneg:
             if moving:
                 imp_ts = np.random.randint(0, num_timesteps)
             else:
                 imp_ts = num_timesteps // 2
             importance_map[:, imp_ts] = True
-            data[:, imp_ts] += signal_mean - noise_mean
+            data[:, imp_ts] += (signal_mean - noise_mean) * 1 if label or not posneg else -1
 
         return data, importance_map
 
     return {
-        'name': f'{"Moving" if moving else ""}{generation_type}RareTime_{noise_mean}_{signal_mean}',
+        'name': f'{"Moving" if moving else ""}{generation_type}RareTime{"PosNeg" if posneg else ""}_{noise_mean}_{signal_mean}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
         'generate_sample': generate_raretime_sample
     }
 
 
-def basic_rare_feature(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2, moving=False):
+def basic_rare_feature(num_features, num_timesteps, generation_type="Gaussian", noise_mean=0, signal_mean=2, moving=False,
+                       posneg=False):
     def generate_rarefeature_sample(shape, label):
         assert len(shape) == 2
         num_features, num_timesteps = shape
@@ -295,18 +297,18 @@ def basic_rare_feature(num_features, num_timesteps, generation_type="Gaussian", 
         importance_map = np.zeros(shape, dtype=bool)
         data = generate_TSR_sample(num_features, num_timesteps, generation_type) + noise_mean
 
-        if label:
+        if label or posneg:
             if moving:
                 imp_ft = np.random.randint(0, num_features)
             else:
                 imp_ft = num_features // 2
             importance_map[imp_ft, :] = True
-            data[imp_ft, :] += signal_mean - noise_mean
+            data[imp_ft, :] += (signal_mean - noise_mean) * 1 if label or not posneg else -1
 
         return data, importance_map
 
     return {
-        'name': f'{"Moving" if moving else ""}{generation_type}RareFeature_{noise_mean}_{signal_mean}',
+        'name': f'{"Moving" if moving else ""}{generation_type}RareFeature{"PosNeg" if posneg else ""}_{noise_mean}_{signal_mean}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
         'generate_sample': generate_rarefeature_sample
@@ -314,9 +316,6 @@ def basic_rare_feature(num_features, num_timesteps, generation_type="Gaussian", 
 
 
 if __name__ == '__main__':
-    np.random.seed(0)
-    torch.manual_seed(0)
-
     # Change these to run different experiments
     generation_types = ["Gaussian", "AutoRegressive", "CAR", "GaussianProcess", "Harmonic", "NARMA", "PseudoPeriodic"]
     experiments = []
@@ -331,6 +330,9 @@ if __name__ == '__main__':
     for i, experiment in enumerate(experiments):
         for j, trainer_type in enumerate(trainer_types):
             for k, method in enumerate(methods):
+                np.random.seed(0)
+                torch.manual_seed(0)
+
                 train_now = train and k == 0
                 train_generator_now = train_generator and j == 0
                 reset_metrics_now = reset_metrics_file and j == 0 and k == 0
