@@ -15,7 +15,7 @@ from FIT.TSX.generator import JointFeatureGenerator
 from TSR.Scripts.Plotting.plot import plotExampleBox
 from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
-from TSR.Scripts.Models.LSTM import LSTM
+from TSR.Scripts.Models.LSTMWithInputCellAttention import LSTMWithInputCellAttention
 from TSR.Scripts.Models.TCN import TCN
 from inverse_fit import inverse_fit_attribute
 
@@ -41,8 +41,6 @@ class MockFitGenerator:
 
 
 def generate_data(experiment, num_samples, batch_size, trainer_type):
-    assert trainer_type in ("FIT", "TSR")
-
     num_features = experiment['num_features']
     num_timesteps = experiment['num_timesteps']
 
@@ -108,12 +106,10 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
     test_samples = 50
     batch_size = 10
 
-    assert trainer_type in ("TSR", "FIT")
-
     print(f"Running {experiment['name']} with {method} and trainer type {trainer_type}")
 
     method_name = f"{method}_TrainerType_{trainer_type}"
-    model_path = f"Models/TCN/{experiment['name']}_BEST.pkl" if trainer_type == "TSR" else f"ckpt/simulation/{experiment['name']}_0.pt"
+    model_path = f"ckpt/simulation/{experiment['name']}_0.pt" if trainer_type == "FIT" else f"Models/{trainer_type}/{experiment['name']}_BEST.pkl"
 
     num_features = experiment['num_features']
     num_timesteps = experiment['num_timesteps']
@@ -138,11 +134,18 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
                            optimizer=optimizer, n_epochs=50, device=device, experiment=experiment['name'])
         else:
             model.load_state_dict(torch.load(model_path))
-    elif trainer_type == "TSR":
+    elif trainer_type == "TCN":
         if train:
             num_chans = [5] * (3 - 1) + [num_timesteps]
             model = TCN(num_features, 2, num_chans, 4, 0.1, ft_dim_last=False).to(device)
             train_model(model, "TCN", experiment['name'], torch.nn.CrossEntropyLoss(), train_tsr_loader, test_tsr_loader, device,
+                        num_timesteps, num_features, 50, experiment['name'], 0.01)
+        model = torch.load(model_path, map_location=device)
+    elif trainer_type == "LSTMWithInputCellAttention":
+        if train:
+            model = LSTMWithInputCellAttention(num_features, 5, 2, 0.1, 10, 50, ft_dim_last=False).to(device)
+            train_model(model, "LSTMWithInputCellAttention", experiment['name'], torch.nn.CrossEntropyLoss(),
+                        train_tsr_loader, test_tsr_loader, device,
                         num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
     else:
@@ -320,12 +323,12 @@ if __name__ == '__main__':
     generation_types = ["Gaussian", "AutoRegressive", "CAR", "GaussianProcess", "Harmonic", "NARMA", "PseudoPeriodic"]
     experiments = []
     for generation_type in generation_types:
-        experiments.append(basic_rare_feature(20, 20, generation_type=generation_type, moving=True, signal_mean=10))
-    methods = ['grad_tsr', 'mock_fit', 'inverse_fit', 'fit']
-    trainer_types = ['TSR', 'FIT']
-    train = True
-    train_generator = True
-    reset_metrics_file = True
+        experiments.append(basic_rare_feature(20, 20, generation_type=generation_type, moving=True, signal_mean=10, posneg=False))
+    methods = ['grad_tsr']
+    trainer_types = ['LSTMWithInputCellAttention']
+    train = False
+    train_generator = False
+    reset_metrics_file = False
 
     for i, experiment in enumerate(experiments):
         for j, trainer_type in enumerate(trainer_types):
