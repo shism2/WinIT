@@ -18,6 +18,8 @@ def generate_sliding_window_data(inputs, labels, window_size, buffer_size, predi
 
 
 def train_model(X_train, y_train, X_test, y_test):
+    _, num_fts, num_ts = X_train.shape
+
     X_train = X_train.reshape(X_train.shape[0], -1)
     X_test = X_test.reshape(X_test.shape[0], -1)
 
@@ -42,6 +44,20 @@ def train_model(X_train, y_train, X_test, y_test):
     AUC = metrics.roc_auc_score(y_test.flatten(), test_predictions.flatten())
     AUPR = metrics.average_precision_score(y_test.flatten(), test_predictions.flatten())
     print(f'XGB Model AUC: {AUC}, AUPR: {AUPR}')
+
+    # Get a matrix of feature importances
+    ft_imp_dict = model.get_booster().get_score(importance_type="gain")
+    ft_imp_matrix = np.zeros((num_fts, num_ts))
+    for i in range(num_fts):
+        for j in range(num_ts):
+            key = f"f{i * num_ts + j}"
+            if key in ft_imp_dict.keys():
+                ft_imp_matrix[i, j] = ft_imp_dict[f"f{i * num_ts + j}"]
+            else:
+                ft_imp_matrix[i, j] = 0
+    np.set_printoptions(precision=3)
+    print("XGB feature importance matrix:")
+    print(ft_imp_matrix / np.max(ft_imp_matrix))
 
     return model
 
@@ -83,9 +99,13 @@ class XGBPytorchStub():
         # Best we can do is run the model on the last window of input, if the input is long enough
         if inputs.shape[2] >= self.window_size:
             window = inputs[:, :, -self.window_size:].detach().numpy().reshape(inputs.shape[0], -1)
-            return torch.from_numpy(self.model.predict(window))
+            prediction = torch.zeros(inputs.shape[0], 2)
+            # Turn our prediction into confidence levels (TODO: Does this make sense?)
+            prediction[:, 0] = torch.from_numpy(self.model.predict(window))
+            prediction[:, 1] = 1 - prediction[:, 0]
+            return prediction
         else:
-            return torch.zeros(inputs.shape[0])
+            return torch.zeros(inputs.shape[0], 2)
 
     def eval(self):
         return self
