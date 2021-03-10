@@ -81,17 +81,17 @@ class XGBPytorchStub():
 
     def __call__(self, inputs):
         # Best we can do is run the model on the last window of input, if the input is long enough
-        window = inputs[:, :, -self.window_size:].detach().numpy().reshape(inputs.shape[0], -1)
         if inputs.shape[2] >= self.window_size:
-            return torch.from_numpy(window)
+            window = inputs[:, :, -self.window_size:].detach().numpy().reshape(inputs.shape[0], -1)
+            return torch.from_numpy(self.model.predict(window))
         else:
             return torch.zeros(inputs.shape[0])
 
     def eval(self):
-        pass
+        return self
 
     def to(self, device):
-        pass
+        return self
 
     def train(self):
         pass
