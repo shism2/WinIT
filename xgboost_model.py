@@ -12,7 +12,10 @@ def generate_sliding_window_data(inputs, labels, window_size, buffer_size, predi
     for t in range(num_ts - window_size - buffer_size - prediction_window_size + 1):
         windows.append(inputs[:, :, t:t + window_size])
         # TODO: Figure out what we want here
-        new_label = np.max(labels[:, t + window_size + buffer_size:t + window_size + buffer_size + prediction_window_size], axis=1)
+        if len(labels.shape) > 1:
+            new_label = np.max(labels[:, t + window_size + buffer_size:t + window_size + buffer_size + prediction_window_size], axis=1)
+        else:
+            new_label = labels[:]
         window_labels.append(new_label)
     return np.concatenate(windows), np.concatenate(window_labels)
 
