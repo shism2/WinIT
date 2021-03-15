@@ -1,6 +1,7 @@
 name: tsi
 channels:
   - pytorch
+  - conda-forge
   - defaults
 dependencies:
   - _libgcc_mutex
@@ -138,6 +139,7 @@ dependencies:
   - webencodings
   - wheel
   - widgetsnbextension
+  - xgboost
   - xz
   - zeromq
   - zipp
