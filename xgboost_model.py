@@ -48,21 +48,25 @@ def train_model(X_train, y_train, X_test, y_test):
     AUPR = metrics.average_precision_score(y_test.flatten(), test_predictions.flatten())
     print(f'XGB Model AUC: {AUC}, AUPR: {AUPR}')
 
-    # Get a matrix of feature importances
-    ft_imp_dict = model.get_booster().get_score(importance_type="gain")
-    ft_imp_matrix = np.zeros((num_fts, num_ts))
-    for i in range(num_fts):
-        for j in range(num_ts):
-            key = f"f{i * num_ts + j}"
-            if key in ft_imp_dict.keys():
-                ft_imp_matrix[i, j] = ft_imp_dict[f"f{i * num_ts + j}"]
-            else:
-                ft_imp_matrix[i, j] = 0
     np.set_printoptions(precision=3)
     print("XGB feature importance matrix:")
-    print(ft_imp_matrix / np.max(ft_imp_matrix))
+    print(get_importance_matrix(model, num_fts, num_ts))
 
     return model
+
+
+def get_importance_matrix(model, num_fts, window_size):
+    # Get a matrix of feature importances
+    ft_imp_dict = model.get_booster().get_score(importance_type="gain")
+    ft_imp_matrix = np.zeros((num_fts, window_size))
+    for i in range(num_fts):
+        for j in range(window_size):
+            key = f"f{i * window_size + j}"
+            if key in ft_imp_dict.keys():
+                ft_imp_matrix[i, j] = ft_imp_dict[f"f{i * window_size + j}"]
+            else:
+                ft_imp_matrix[i, j] = 0
+    return ft_imp_matrix / np.max(ft_imp_matrix)
 
 
 def simple_experiment_data(shape, imp_ft, noise_mean=0, signal_mean=10):
@@ -89,6 +93,7 @@ def loader_to_np(loader):
 
 class XGBPytorchStub():
     def __init__(self, train_loader, test_loader, window_size, buffer_size, prediction_window_size):
+        self.num_fts = next(iter(train_loader))[0].shape[1]
         self.window_size = window_size
         self.buffer_size = buffer_size
         self.prediction_window_size = prediction_window_size
@@ -118,6 +123,10 @@ class XGBPytorchStub():
 
     def train(self):
         pass
+
+    @property
+    def imp_matrix(self):
+        return get_importance_matrix(self.model, self.num_fts, self.window_size)
 
 
 def main():
