@@ -20,7 +20,7 @@ def generate_sliding_window_data(inputs, labels, window_size, buffer_size, predi
     return np.concatenate(windows), np.concatenate(window_labels)
 
 
-def train_model(X_train, y_train, X_test, y_test):
+def get_model(X_train, y_train, X_test, y_test, filename, train):
     _, num_fts, num_ts = X_train.shape
 
     X_train = X_train.reshape(X_train.shape[0], -1)
@@ -35,13 +35,17 @@ def train_model(X_train, y_train, X_test, y_test):
         eta=0.3,
         seed=0)
 
-    model.fit(
-        X_train,
-        y_train,
-        eval_metric="rmse",
-        eval_set=[(X_train, y_train), (X_test, y_test)],
-        verbose=True,
-        early_stopping_rounds=10)
+    if train:
+        model.fit(
+            X_train,
+            y_train,
+            eval_metric="rmse",
+            eval_set=[(X_train, y_train), (X_test, y_test)],
+            verbose=True,
+            early_stopping_rounds=10)
+        model.save_model(filename)
+    else:
+        model.load_model(filename)
 
     test_predictions = model.predict(X_test)
     AUC = metrics.roc_auc_score(y_test.flatten(), test_predictions.flatten())
@@ -92,7 +96,7 @@ def loader_to_np(loader):
 
 
 class XGBPytorchStub():
-    def __init__(self, train_loader, test_loader, window_size, buffer_size, prediction_window_size):
+    def __init__(self, train_loader, test_loader, window_size, buffer_size, prediction_window_size, filename, train):
         self.num_fts = next(iter(train_loader))[0].shape[1]
         self.window_size = window_size
         self.buffer_size = buffer_size
@@ -101,7 +105,7 @@ class XGBPytorchStub():
         X_train, y_train = generate_sliding_window_data(*loader_to_np(train_loader), self.window_size, self.buffer_size, self.prediction_window_size)
         X_test, y_test = generate_sliding_window_data(*loader_to_np(test_loader), self.window_size, self.buffer_size, self.prediction_window_size)
 
-        self.model = train_model(X_train, y_train, X_test, y_test)
+        self.model = get_model(X_train, y_train, X_test, y_test, filename, train)
 
     def __call__(self, inputs):
         # Best we can do is run the model on the last window of input, if the input is long enough
