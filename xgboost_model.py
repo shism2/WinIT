@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from xgboost import XGBRegressor
+from xgboost import XGBClassifier
 from sklearn import metrics
 
 
@@ -26,14 +26,7 @@ def get_model(X_train, y_train, X_test, y_test, filename, train):
     X_train = X_train.reshape(X_train.shape[0], -1)
     X_test = X_test.reshape(X_test.shape[0], -1)
 
-    model = XGBRegressor(
-        max_depth=8,
-        n_estimators=1000,
-        min_child_weight=300,
-        colsample_bytree=0.8,
-        subsample=0.8,
-        eta=0.3,
-        seed=0)
+    model = XGBClassifier()
 
     if train:
         model.fit(
@@ -111,10 +104,7 @@ class XGBPytorchStub():
         # Best we can do is run the model on the last window of input, if the input is long enough
         if inputs.shape[2] >= self.window_size:
             window = inputs[:, :, -self.window_size:].detach().numpy().reshape(inputs.shape[0], -1)
-            prediction = torch.zeros(inputs.shape[0], 2)
-            # Turn our prediction into confidence levels (TODO: Does this make sense?)
-            prediction[:, 0] = torch.from_numpy(self.model.predict(window))
-            prediction[:, 1] = 1 - prediction[:, 0]
+            prediction = torch.from_numpy(self.model.predict_proba(window))
             return prediction
         else:
             return torch.zeros(inputs.shape[0], 2)
