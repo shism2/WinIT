@@ -103,7 +103,7 @@ class XGBPytorchStub():
     def __call__(self, inputs):
         # Best we can do is run the model on the last window of input, if the input is long enough
         if inputs.shape[2] >= self.window_size:
-            window = inputs[:, :, -self.window_size:].detach().numpy().reshape(inputs.shape[0], -1)
+            window = inputs[:, :, -self.window_size:].cpu().detach().numpy().reshape(inputs.shape[0], -1)
             prediction = torch.from_numpy(self.model.predict_proba(window))
             return prediction
         else:
