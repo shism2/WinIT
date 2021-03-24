@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from xgboost import XGBClassifier
+from xgboost import XGBClassifier, XGBRegressor
 from sklearn import metrics
 
 
@@ -26,7 +26,7 @@ def get_model(X_train, y_train, X_test, y_test, filename, train):
     X_train = X_train.reshape(X_train.shape[0], -1)
     X_test = X_test.reshape(X_test.shape[0], -1)
 
-    model = XGBClassifier()
+    model = XGBRegressor(objective='binary:logistic')
 
     if train:
         model.fit(
@@ -104,7 +104,10 @@ class XGBPytorchStub():
         # Best we can do is run the model on the last window of input, if the input is long enough
         if inputs.shape[2] >= self.window_size:
             window = inputs[:, :, -self.window_size:].cpu().detach().numpy().reshape(inputs.shape[0], -1)
-            prediction = torch.from_numpy(self.model.predict_proba(window))
+            prob_class_1 = torch.from_numpy(self.model.predict(window))
+            prediction = torch.zeros((inputs.shape[0], 2))
+            prediction[:, 0] = 1 - prob_class_1
+            prediction[:, 1] = prob_class_1
             return prediction
         else:
             return torch.zeros(inputs.shape[0], 2)
