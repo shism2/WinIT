@@ -149,7 +149,7 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
                         num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
     elif model_type == "XGB":
-        model = XGBPytorchStub(train_loader, test_loader, 1, 0, 1, f'ckpt/{experiment["name"]}/XGB.model', True)
+        model = XGBPytorchStub(train_loader, test_loader, 10, 0, 1, f'ckpt/{experiment["name"]}/XGB.model', True)
     else:
         raise Exception(f"Trainer type {model_type} unrecognized")
 
@@ -330,9 +330,6 @@ def and_experiment(num_features, num_timesteps, noise, signal):
         labels = np.all(data == signal, axis=1)
         gt_imp = np.repeat(labels[:, :, None], num_features, axis=2).swapaxes(1, 2)
         labels[:, 1:num_timesteps] = labels[:, 0:num_timesteps - 1]
-        print(data[0])
-        print(labels[0])
-        print(gt_imp[0])
         loader = DataLoader(TensorDataset(torch.from_numpy(data).float(), torch.from_numpy(labels)), batch_size=batch_size)
         return loader, data, gt_imp
 
@@ -344,11 +341,38 @@ def and_experiment(num_features, num_timesteps, noise, signal):
     }
 
 
+def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1):
+    def generate_data(num_samples, batch_size, model_type):
+        assert model_type == 'FIT' or model_type == 'XGB'
+        data = np.full((num_samples, num_features, num_timesteps), fill_value=noise)
+        for sample in range(num_samples):
+            imp_ft = np.random.randint(0, num_features)
+            imp_ts = np.random.randint(0, num_timesteps)
+            data[sample, imp_ft, imp_ts] = signal
+
+        labels = np.zeros((num_samples, num_timesteps))
+        labels[:, 1 + delay_amount:num_timesteps] = np.any(data == signal, axis=1)[:, 0:num_timesteps - 1 - delay_amount]
+
+        gt_imp = data == signal
+
+        loader = DataLoader(TensorDataset(torch.from_numpy(data).float(), torch.from_numpy(labels)),
+                            batch_size=batch_size)
+
+        return loader, data, gt_imp
+
+    return {
+        'name': f'DelayExperiment_{noise}_{signal}',
+        'num_features': num_features,
+        'num_timesteps': num_timesteps,
+        'generate_data': generate_data
+    }
+
+
 if __name__ == '__main__':
     # Change these to run different experiments
-    experiments = [and_experiment(2, 50, 0, 1)]
+    experiments = [delay_experiment(2, 50, 0, 1)]
     methods = ['fit']
-    model_types = ['FIT']
+    model_types = ['XGB']
     train = False
     train_generator = False
     reset_metrics_file = False
