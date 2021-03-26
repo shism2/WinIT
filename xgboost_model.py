@@ -1,3 +1,6 @@
+import pathlib
+import os
+
 import shap
 import numpy as np
 import torch
@@ -31,6 +34,7 @@ def get_model(X_train, y_train, X_test, y_test, filename=None, train=True):
 
     model = XGBRegressor(objective='binary:logistic')
 
+    pathlib.Path(os.path.dirname(filename)).mkdir(parents=True, exist_ok=True)
     if train or filename is None:
         model.fit(
             X_train,

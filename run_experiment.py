@@ -18,6 +18,7 @@ from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTMWithInputCellAttention import LSTMWithInputCellAttention
 from TSR.Scripts.Models.TCN import TCN
 from inverse_fit import inverse_fit_attribute
+from xgboost_model import XGBPytorchStub
 
 
 class MockFitGenerator:
@@ -58,7 +59,7 @@ def generate_data(experiment, num_samples, batch_size, trainer_type):
     data = torch.from_numpy(data).float() if trainer_type == "FIT" else torch.from_numpy(data).double()
     tsr_loader = DataLoader(TensorDataset(data, torch.from_numpy(labels)), batch_size=batch_size)
     fit_loader = DataLoader(TensorDataset(data, torch.from_numpy(labels_in_time)), batch_size=batch_size)
-    return tsr_loader, fit_loader, data, ground_truth_importance
+    return (fit_loader if trainer_type in ["FIT", "XGB"] else tsr_loader), data, ground_truth_importance
 
 
 def get_fit_attributions(model, train_loader, test_loader, num_features, name, train, mock_generator, activation=lambda x: x):
@@ -120,44 +121,46 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
         method = 'fit'
         mock_fit_generator = True
 
-    train_tsr_loader, train_fit_loader, train_data, train_gt = \
-        generate_data(experiment, train_samples, batch_size, trainer_type)
-    test_tsr_loader, test_fit_loader, test_data, test_gt = \
-        generate_data(experiment, test_samples, batch_size, trainer_type)
+    train_loader, train_data, train_gt = experiment['generate_data'](train_samples, batch_size, trainer_type) \
+        if 'generate_data' in experiment.keys() else generate_data(experiment, train_samples, batch_size, trainer_type)
+    test_loader, test_data, test_gt = experiment['generate_data'](test_samples, batch_size, trainer_type) \
+        if 'generate_data' in experiment.keys() else generate_data(experiment, test_samples, batch_size, trainer_type)
 
     if trainer_type == "FIT":
         model = StateClassifier(feature_size=num_features, n_state=2, hidden_size=200, rnn='GRU')
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
         if train:
-            train_model_rt(model=model, train_loader=train_fit_loader, valid_loader=test_fit_loader,
-                           optimizer=optimizer, n_epochs=50, device=device, experiment=experiment['name'])
+            train_model_rt(model=model, train_loader=train_loader, valid_loader=test_loader,
+                           optimizer=optimizer, n_epochs=5, device=device, experiment=experiment['name'])
         else:
             model.load_state_dict(torch.load(model_path))
     elif trainer_type == "TCN":
         if train:
             num_chans = [5] * (3 - 1) + [num_timesteps]
             model = TCN(num_features, 2, num_chans, 4, 0.1, ft_dim_last=False).to(device)
-            train_model(model, "TCN", experiment['name'], torch.nn.CrossEntropyLoss(), train_tsr_loader, test_tsr_loader, device,
+            train_model(model, "TCN", experiment['name'], torch.nn.CrossEntropyLoss(), train_loader, test_loader, device,
                         num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
     elif trainer_type == "LSTMWithInputCellAttention":
         if train:
             model = LSTMWithInputCellAttention(num_features, 5, 2, 0.1, 10, 50, ft_dim_last=False).to(device)
             train_model(model, "LSTMWithInputCellAttention", experiment['name'], torch.nn.CrossEntropyLoss(),
-                        train_tsr_loader, test_tsr_loader, device,
+                        train_loader, test_loader, device,
                         num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
+    elif trainer_type == "XGB":
+        model = XGBPytorchStub(train_loader, test_loader, 1, 0, 1, f'ckpt/{experiment["name"]}/XGB.model', True)
     else:
         raise Exception(f"Trainer type {trainer_type} unrecognized")
 
     if method == 'fit':
-        attributions = get_fit_attributions(model, train_tsr_loader, test_tsr_loader, num_features,
+        attributions = get_fit_attributions(model, train_loader, test_loader, num_features,
                                             experiment['name'], train_generator, mock_fit_generator,
                                             torch.nn.Softmax(-1) if trainer_type == "FIT" else lambda x: x)
     elif method == 'grad_tsr':
-        attributions = get_tsr_attributions(Saliency(model), test_tsr_loader)
-    elif method == 'inverse_fit':
-        attributions = get_inverse_fit_attributions(model, test_tsr_loader, trainer_type)
+        attributions = get_tsr_attributions(Saliency(model), test_loader)
+    elif method == 'ifit':
+        attributions = get_inverse_fit_attributions(model, test_loader, trainer_type)
     else:
         raise Exception(f"Method {method} unrecognized")
 
@@ -195,6 +198,8 @@ Experiments need
 - 'num_features': int
 - 'num_timesteps': int
 - 'generate_sample': function(shape, label) - returns (sample, boolean importance map)
+OR
+- 'generate_data': function(num_samples, batch_size, model_type) - returns (loader, data, ground_truth_importance)
 """
 
 
@@ -318,14 +323,32 @@ def basic_rare_feature(num_features, num_timesteps, generation_type="Gaussian", 
     }
 
 
+def and_experiment(num_features, num_timesteps, noise, signal):
+    def generate_data(num_samples, batch_size, model_type):
+        assert model_type == 'FIT' or model_type == 'XGB'
+        data = np.random.choice([noise, signal], (num_samples, num_features, num_timesteps))
+        labels = np.all(data == signal, axis=1)
+        gt_imp = np.repeat(labels[:, :, None], num_features, axis=2).swapaxes(1, 2)
+        labels[:, 1:num_timesteps] = labels[:, 0:num_timesteps - 1]
+        print(data[0])
+        print(labels[0])
+        print(gt_imp[0])
+        loader = DataLoader(TensorDataset(torch.from_numpy(data).float(), torch.from_numpy(labels)), batch_size=batch_size)
+        return loader, data, gt_imp
+
+    return {
+        'name': f'AndExperiment_{noise}_{signal}',
+        'num_features': num_features,
+        'num_timesteps': num_timesteps,
+        'generate_data': generate_data
+    }
+
+
 if __name__ == '__main__':
     # Change these to run different experiments
-    generation_types = ["Gaussian", "AutoRegressive", "CAR", "GaussianProcess", "Harmonic", "NARMA", "PseudoPeriodic"]
-    experiments = []
-    for generation_type in generation_types:
-        experiments.append(basic_rare_feature(20, 20, generation_type=generation_type, moving=True, signal_mean=10, posneg=False))
-    methods = ['grad_tsr']
-    trainer_types = ['LSTMWithInputCellAttention']
+    experiments = [and_experiment(2, 50, 0, 1)]
+    methods = ['fit']
+    trainer_types = ['FIT']
     train = False
     train_generator = False
     reset_metrics_file = False
