@@ -41,7 +41,7 @@ class MockFitGenerator:
         return full_sample, None
 
 
-def generate_data(experiment, num_samples, batch_size, trainer_type):
+def generate_data(experiment, num_samples, batch_size, model_type):
     num_features = experiment['num_features']
     num_timesteps = experiment['num_timesteps']
 
@@ -56,10 +56,10 @@ def generate_data(experiment, num_samples, batch_size, trainer_type):
             first_important_timestep = np.min(np.argwhere(ground_truth_importance[i])[:, 1])
             labels_in_time[i, first_important_timestep:] = 1
 
-    data = torch.from_numpy(data).float() if trainer_type == "FIT" else torch.from_numpy(data).double()
+    data = torch.from_numpy(data).float() if model_type == "FIT" else torch.from_numpy(data).double()
     tsr_loader = DataLoader(TensorDataset(data, torch.from_numpy(labels)), batch_size=batch_size)
     fit_loader = DataLoader(TensorDataset(data, torch.from_numpy(labels_in_time)), batch_size=batch_size)
-    return (fit_loader if trainer_type in ["FIT", "XGB"] else tsr_loader), data, ground_truth_importance
+    return (fit_loader if model_type in ["FIT", "XGB"] else tsr_loader), data, ground_truth_importance
 
 
 def get_fit_attributions(model, train_loader, test_loader, num_features, name, train, mock_generator, activation=lambda x: x):
@@ -92,8 +92,8 @@ def get_tsr_attributions(saliency, test_loader):
     return tsr_attributions
 
 
-def get_inverse_fit_attributions(model, test_loader, trainer_type):
-    activation = torch.nn.Softmax(-1) if trainer_type == "FIT" else None
+def get_inverse_fit_attributions(model, test_loader, model_type):
+    activation = torch.nn.Softmax(-1) if model_type == "FIT" else None
     ifit_attributions = []
     for x, _ in test_loader:
         ifit_attributions.append(inverse_fit_attribute(x, model, activation))
@@ -101,15 +101,15 @@ def get_inverse_fit_attributions(model, test_loader, trainer_type):
     return ifit_attributions
 
 
-def run_experiment(experiment, method, trainer_type, train, train_generator, reset_metrics_file=False):
+def run_experiment(experiment, method, model_type, train, train_generator, reset_metrics_file=False):
     train_samples = 500
     test_samples = 50
     batch_size = 10
 
-    print(f"Running {experiment['name']} with {method} and trainer type {trainer_type}")
+    print(f"Running {experiment['name']} with {method} and trainer type {model_type}")
 
-    method_name = f"{method}_TrainerType_{trainer_type}"
-    model_path = f"ckpt/simulation/{experiment['name']}_0.pt" if trainer_type == "FIT" else f"Models/{trainer_type}/{experiment['name']}_BEST.pkl"
+    method_name = f"{method}_TrainerType_{model_type}"
+    model_path = f"ckpt/simulation/{experiment['name']}_0.pt" if model_type == "FIT" else f"Models/{model_type}/{experiment['name']}_BEST.pkl"
 
     num_features = experiment['num_features']
     num_timesteps = experiment['num_timesteps']
@@ -121,12 +121,12 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
         method = 'fit'
         mock_fit_generator = True
 
-    train_loader, train_data, train_gt = experiment['generate_data'](train_samples, batch_size, trainer_type) \
-        if 'generate_data' in experiment.keys() else generate_data(experiment, train_samples, batch_size, trainer_type)
-    test_loader, test_data, test_gt = experiment['generate_data'](test_samples, batch_size, trainer_type) \
-        if 'generate_data' in experiment.keys() else generate_data(experiment, test_samples, batch_size, trainer_type)
+    train_loader, train_data, train_gt = experiment['generate_data'](train_samples, batch_size, model_type) \
+        if 'generate_data' in experiment.keys() else generate_data(experiment, train_samples, batch_size, model_type)
+    test_loader, test_data, test_gt = experiment['generate_data'](test_samples, batch_size, model_type) \
+        if 'generate_data' in experiment.keys() else generate_data(experiment, test_samples, batch_size, model_type)
 
-    if trainer_type == "FIT":
+    if model_type == "FIT":
         model = StateClassifier(feature_size=num_features, n_state=2, hidden_size=200, rnn='GRU')
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
         if train:
@@ -134,33 +134,33 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
                            optimizer=optimizer, n_epochs=5, device=device, experiment=experiment['name'])
         else:
             model.load_state_dict(torch.load(model_path))
-    elif trainer_type == "TCN":
+    elif model_type == "TCN":
         if train:
             num_chans = [5] * (3 - 1) + [num_timesteps]
             model = TCN(num_features, 2, num_chans, 4, 0.1, ft_dim_last=False).to(device)
             train_model(model, "TCN", experiment['name'], torch.nn.CrossEntropyLoss(), train_loader, test_loader, device,
                         num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
-    elif trainer_type == "LSTMWithInputCellAttention":
+    elif model_type == "LSTMWithInputCellAttention":
         if train:
             model = LSTMWithInputCellAttention(num_features, 5, 2, 0.1, 10, 50, ft_dim_last=False).to(device)
             train_model(model, "LSTMWithInputCellAttention", experiment['name'], torch.nn.CrossEntropyLoss(),
                         train_loader, test_loader, device,
                         num_timesteps, num_features, 50, experiment['name'], 0.01)
         model = torch.load(model_path, map_location=device)
-    elif trainer_type == "XGB":
+    elif model_type == "XGB":
         model = XGBPytorchStub(train_loader, test_loader, 1, 0, 1, f'ckpt/{experiment["name"]}/XGB.model', True)
     else:
-        raise Exception(f"Trainer type {trainer_type} unrecognized")
+        raise Exception(f"Trainer type {model_type} unrecognized")
 
     if method == 'fit':
         attributions = get_fit_attributions(model, train_loader, test_loader, num_features,
                                             experiment['name'], train_generator, mock_fit_generator,
-                                            torch.nn.Softmax(-1) if trainer_type == "FIT" else lambda x: x)
+                                            torch.nn.Softmax(-1) if model_type == "FIT" else lambda x: x)
     elif method == 'grad_tsr':
         attributions = get_tsr_attributions(Saliency(model), test_loader)
     elif method == 'ifit':
-        attributions = get_inverse_fit_attributions(model, test_loader, trainer_type)
+        attributions = get_inverse_fit_attributions(model, test_loader, model_type)
     else:
         raise Exception(f"Method {method} unrecognized")
 
@@ -348,13 +348,13 @@ if __name__ == '__main__':
     # Change these to run different experiments
     experiments = [and_experiment(2, 50, 0, 1)]
     methods = ['fit']
-    trainer_types = ['FIT']
+    model_types = ['FIT']
     train = False
     train_generator = False
     reset_metrics_file = False
 
     for i, experiment in enumerate(experiments):
-        for j, trainer_type in enumerate(trainer_types):
+        for j, model_type in enumerate(model_types):
             for k, method in enumerate(methods):
                 np.random.seed(0)
                 torch.manual_seed(0)
@@ -363,4 +363,4 @@ if __name__ == '__main__':
                 train_generator_now = train_generator and j == 0
                 reset_metrics_now = reset_metrics_file and j == 0 and k == 0
 
-                run_experiment(experiment, method, trainer_type, train_now, train_generator_now, reset_metrics_file=reset_metrics_now)
+                run_experiment(experiment, method, model_type, train_now, train_generator_now, reset_metrics_file=reset_metrics_now)
