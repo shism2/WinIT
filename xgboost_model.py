@@ -1,3 +1,4 @@
+import shap
 import numpy as np
 import torch
 from xgboost import XGBClassifier, XGBRegressor
@@ -99,6 +100,7 @@ class XGBPytorchStub():
         X_test, y_test = generate_sliding_window_data(*loader_to_np(test_loader), self.window_size, self.buffer_size, self.prediction_window_size)
 
         self.model = get_model(X_train, y_train, X_test, y_test, filename, train)
+        self.shap_explainer = shap.Explainer(self.model)
 
     def __call__(self, inputs):
         # Best we can do is run the model on the last window of input, if the input is long enough
@@ -124,6 +126,17 @@ class XGBPytorchStub():
     @property
     def imp_matrix(self):
         return get_importance_matrix(self.model, self.num_fts, self.window_size)
+
+    def timeshap(self, inputs):
+        batch_size, num_fts, num_ts = inputs.shape
+        inputs = inputs.cpu().detach().numpy()
+        score = np.zeros(inputs.shape)
+        for t in range(self.window_size, max(self.window_size, num_ts)):
+            window = inputs[:, :, t - self.window_size:t].reshape(batch_size, -1)
+            imp = self.shap_explainer(window).values
+            imp = imp.reshape(batch_size, num_fts, self.window_size)
+            score[:, :, t] = imp[:, :, -1]
+        return score
 
 
 def main():
