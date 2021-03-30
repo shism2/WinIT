@@ -3,6 +3,9 @@ import torch
 
 
 def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
+    if isinstance(x, np.ndarray):
+        x = torch.from_numpy(x)
+
     def model_predict(x):
         if ft_dim_last:
             x = x.permute(0, 2, 1)

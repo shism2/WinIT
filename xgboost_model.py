@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from xgboost import XGBClassifier, XGBRegressor
 from sklearn import metrics
+import matplotlib.pyplot as plt
+from inverse_fit import inverse_fit_attribute
 
 
 def generate_sliding_window_data(inputs, labels, window_size, buffer_size, prediction_window_size):
@@ -21,7 +23,7 @@ def generate_sliding_window_data(inputs, labels, window_size, buffer_size, predi
     return np.concatenate(windows), np.concatenate(window_labels)
 
 
-def get_model(X_train, y_train, X_test, y_test, filename, train):
+def get_model(X_train, y_train, X_test, y_test, filename=None, train=True):
     _, num_fts, num_ts = X_train.shape
 
     X_train = X_train.reshape(X_train.shape[0], -1)
@@ -29,7 +31,7 @@ def get_model(X_train, y_train, X_test, y_test, filename, train):
 
     model = XGBRegressor(objective='binary:logistic')
 
-    if train:
+    if train or filename is None:
         model.fit(
             X_train,
             y_train,
@@ -37,8 +39,10 @@ def get_model(X_train, y_train, X_test, y_test, filename, train):
             eval_set=[(X_train, y_train), (X_test, y_test)],
             verbose=True,
             early_stopping_rounds=10)
-        model.save_model(filename)
+        if filename is not None:
+            model.save_model(filename)
     else:
+        assert filename is not None
         model.load_model(filename)
 
     test_predictions = model.predict(X_test)
@@ -90,17 +94,33 @@ def loader_to_np(loader):
 
 
 class XGBPytorchStub():
-    def __init__(self, train_loader, test_loader, window_size, buffer_size, prediction_window_size, filename, train):
-        self.num_fts = next(iter(train_loader))[0].shape[1]
+    def __init__(self, train_loader, test_loader, window_size, buffer_size, prediction_window_size, filename=None, train=True):
         self.window_size = window_size
         self.buffer_size = buffer_size
         self.prediction_window_size = prediction_window_size
 
-        X_train, y_train = generate_sliding_window_data(*loader_to_np(train_loader), self.window_size, self.buffer_size, self.prediction_window_size)
-        X_test, y_test = generate_sliding_window_data(*loader_to_np(test_loader), self.window_size, self.buffer_size, self.prediction_window_size)
+        # Used for overloading, these should not be none if the constructor is used directly
+        if train_loader is not None and test_loader is not None:
+            self.num_fts = next(iter(train_loader))[0].shape[1]
+            self.X_train, self.y_train = generate_sliding_window_data(*loader_to_np(train_loader), self.window_size, self.buffer_size, self.prediction_window_size)
+            self.X_test, self.y_test = generate_sliding_window_data(*loader_to_np(test_loader), self.window_size, self.buffer_size, self.prediction_window_size)
 
-        self.model = get_model(X_train, y_train, X_test, y_test, filename, train)
-        self.shap_explainer = shap.Explainer(self.model)
+            self.model = get_model(self.X_train, self.y_train, self.X_test, self.y_test, filename, train)
+
+    @classmethod
+    def from_sklearn(cls, model, num_fts, window_size, buffer_size, prediction_window_size):
+        pt_wrapper = cls(None, None, window_size, buffer_size, prediction_window_size)
+        pt_wrapper.model = model
+        pt_wrapper.num_fts = num_fts
+        return pt_wrapper
+
+    @property
+    def shap_explainer(self):
+        return shap.Explainer(self.model)
+
+    @property
+    def imp_matrix(self):
+        return get_importance_matrix(self.model, self.num_fts, self.window_size)
 
     def __call__(self, inputs):
         # Best we can do is run the model on the last window of input, if the input is long enough
@@ -123,10 +143,6 @@ class XGBPytorchStub():
     def train(self):
         pass
 
-    @property
-    def imp_matrix(self):
-        return get_importance_matrix(self.model, self.num_fts, self.window_size)
-
     def timeshap(self, inputs):
         batch_size, num_fts, num_ts = inputs.shape
         inputs = inputs.cpu().detach().numpy()
@@ -137,6 +153,44 @@ class XGBPytorchStub():
             imp = imp.reshape(batch_size, num_fts, self.window_size)
             score[:, :, t] = imp[:, :, -1]
         return score
+
+
+def remove_and_retrain(train_loader, test_loader, window_size, buffer_size, prediction_window_size, graph_path, saliency_name, saliency_map=None):
+    X_train, y_train = loader_to_np(train_loader)
+    X_test, y_test = loader_to_np(test_loader)
+
+    _, num_fts, num_ts = X_train.shape
+
+    assert saliency_name in ["gain"] or saliency_map is not None
+
+    auc = []
+
+    for i in range(num_fts):
+        train_windows, train_labels = generate_sliding_window_data(X_train, y_train, window_size, buffer_size, prediction_window_size)
+        test_windows, test_labels = generate_sliding_window_data(X_test, y_test, window_size, buffer_size, prediction_window_size)
+
+        cur_model = get_model(train_windows, train_labels, test_windows, test_labels)
+        auc.append(metrics.roc_auc_score(test_labels.flatten(), cur_model.predict(test_windows.reshape(test_windows.shape[0], -1)).flatten()))
+
+        if i == 0:
+            if saliency_name == "gain":
+                imp_matrix = get_importance_matrix(cur_model, num_fts, window_size)
+                imp_fts = np.mean(imp_matrix, axis=-1)
+            else:
+                imp_fts = np.mean(saliency_map, axis=(0, 2))
+
+        most_imp_ft = np.argmax(imp_fts)
+        imp_fts = np.delete(imp_fts, most_imp_ft)
+        X_train = np.delete(X_train, most_imp_ft, axis=1)
+        X_test = np.delete(X_test, most_imp_ft, axis=1)
+
+    plt.plot(range(num_fts), auc)
+    plt.xticks(range(num_fts))
+    plt.xlabel(f"Top features removed (based on {saliency_name})")
+    plt.ylim(0.5, 1)
+    plt.ylabel("XGB AUC")
+    plt.savefig(graph_path)
+    print(f'AUC ROAR graph saved to {graph_path}')
 
 
 def main():
@@ -157,7 +211,7 @@ def main():
     X_train, y_train = generate_sliding_window_data(X_train, y_train, window_size, buffer_size, prediction_window_size)
     X_test, y_test = generate_sliding_window_data(X_test, y_test, window_size, buffer_size, prediction_window_size)
 
-    model = train_model(X_train, y_train, X_test, y_test)
+    model = get_model(X_train, y_train, X_test, y_test)
 
 
 if __name__ == '__main__':
