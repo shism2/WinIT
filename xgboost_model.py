@@ -161,7 +161,7 @@ def remove_and_retrain(train_loader, test_loader, window_size, buffer_size, pred
 
     _, num_fts, num_ts = X_train.shape
 
-    assert saliency_name in ["gain"] or saliency_map is not None
+    assert saliency_name in ["gain", "random"] or saliency_map is not None
 
     auc = []
 
@@ -176,6 +176,8 @@ def remove_and_retrain(train_loader, test_loader, window_size, buffer_size, pred
             if saliency_name == "gain":
                 imp_matrix = get_importance_matrix(cur_model, num_fts, window_size)
                 imp_fts = np.mean(imp_matrix, axis=-1)
+            elif saliency_name == "random":
+                imp_fts = np.random.random(num_fts)
             else:
                 imp_fts = np.mean(saliency_map, axis=(0, 2))
 
@@ -184,11 +186,12 @@ def remove_and_retrain(train_loader, test_loader, window_size, buffer_size, pred
         X_train = np.delete(X_train, most_imp_ft, axis=1)
         X_test = np.delete(X_test, most_imp_ft, axis=1)
 
-    plt.plot(range(num_fts), auc)
-    plt.xticks(range(num_fts))
+    plt.clf()
+    plt.plot(list(range(num_fts)), auc)
+    plt.xlim(0, num_fts)
     plt.xlabel(f"Top features removed (based on {saliency_name})")
     plt.ylim(0.5, 1)
-    plt.ylabel("XGB AUC")
+    plt.ylabel(f"XGB AUC (AUAUC ~= {np.trapz(auc, list(range(num_fts))):.3f})")
     plt.savefig(graph_path)
     print(f'AUC ROAR graph saved to {graph_path}')
 
