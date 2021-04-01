@@ -57,9 +57,9 @@ def get_model(X_train, y_train, X_test, y_test, filename=None, train=True):
     return model
 
 
-def get_importance_matrix(model, num_fts, window_size):
+def get_importance_matrix(model, num_fts, window_size, importance_type="gain"):
     # Get a matrix of feature importances
-    ft_imp_dict = model.get_booster().get_score(importance_type="gain")
+    ft_imp_dict = model.get_booster().get_score(importance_type=importance_type)
     ft_imp_matrix = np.zeros((num_fts, window_size))
     for i in range(num_fts):
         for j in range(window_size):
@@ -161,7 +161,7 @@ def remove_and_retrain(train_loader, test_loader, window_size, buffer_size, pred
 
     _, num_fts, num_ts = X_train.shape
 
-    assert saliency_name in ["gain", "random"] or saliency_map is not None
+    assert saliency_name in ["gain", "cover", "random", "greedy"] or saliency_map is not None
 
     auc = []
 
@@ -172,9 +172,25 @@ def remove_and_retrain(train_loader, test_loader, window_size, buffer_size, pred
         cur_model = get_model(train_windows, train_labels, test_windows, test_labels)
         auc.append(metrics.roc_auc_score(test_labels.flatten(), cur_model.predict(test_windows.reshape(test_windows.shape[0], -1)).flatten()))
 
-        if i == 0:
-            if saliency_name == "gain":
-                imp_matrix = get_importance_matrix(cur_model, num_fts, window_size)
+        if saliency_name == "greedy":
+            if X_train.shape[1] > 1:
+                new_auc = []
+                for j in range(num_fts - i):
+                    new_X_train = np.delete(X_train, j, axis=1)
+                    new_X_test = np.delete(X_test, j, axis=1)
+                    train_windows, train_labels = generate_sliding_window_data(new_X_train, y_train, window_size, buffer_size,
+                                                                               prediction_window_size)
+                    test_windows, test_labels = generate_sliding_window_data(new_X_test, y_test, window_size, buffer_size,
+                                                                             prediction_window_size)
+                    cur_model = get_model(train_windows, train_labels, test_windows, test_labels)
+                    new_auc.append(metrics.roc_auc_score(test_labels.flatten(), cur_model.predict(
+                        test_windows.reshape(test_windows.shape[0], -1)).flatten()))
+                imp_fts = auc[-1] - np.array(new_auc)
+            else:
+                imp_fts = np.array([0])
+        elif i == 0:
+            if saliency_name in ["gain", "cover"]:
+                imp_matrix = get_importance_matrix(cur_model, num_fts, window_size, importance_type=saliency_name)
                 imp_fts = np.mean(imp_matrix, axis=-1)
             elif saliency_name == "random":
                 imp_fts = np.random.random(num_fts)
