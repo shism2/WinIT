@@ -371,8 +371,8 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1)
 if __name__ == '__main__':
     # Change these to run different experiments
     experiments = [delay_experiment(2, 50, 0, 1)]
-    methods = ['fit']
-    model_types = ['XGB']
+    methods = ['fit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit']
+    model_types = ['XGB']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
     train = False
     train_generator = False
     reset_metrics_file = False
