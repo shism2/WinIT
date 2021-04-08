@@ -1,7 +1,6 @@
 import pathlib
 import os
 
-import shap
 import numpy as np
 import torch
 from xgboost import XGBClassifier, XGBRegressor
@@ -120,6 +119,7 @@ class XGBPytorchStub():
 
     @property
     def shap_explainer(self):
+        # TODO: Figure out shap's import problem and reenable shap
         return shap.Explainer(self.model)
 
     @property
