@@ -61,8 +61,7 @@ def generate_data(experiment, num_samples, batch_size, trainer_type):
     return tsr_loader, fit_loader, data, ground_truth_importance
 
 
-def get_fit_attributions(model, train_loader, test_loader, num_features, name, train, mock_generator):
-    activation = torch.nn.Softmax(-1) if trainer_type == "FIT" else lambda x: x
+def get_fit_attributions(model, train_loader, test_loader, num_features, name, train, mock_generator, activation=lambda x: x):
     if mock_generator:
         generator = MockFitGenerator()
         FIT = FITExplainer(model, generator=generator, ft_dim_last=False, activation=activation)
@@ -70,7 +69,7 @@ def get_fit_attributions(model, train_loader, test_loader, num_features, name, t
         generator = JointFeatureGenerator(num_features, latent_size=100, data=name)
         if train:
             FIT = FITExplainer(model, ft_dim_last=False, activation=activation)
-            FIT.fit_generator(generator, train_loader, test_loader, n_epochs=50)
+            FIT.fit_generator(generator, train_loader, test_loader, n_epochs=300)
         else:
             generator.load_state_dict(torch.load(f'ckpt/{name}/joint_generator_0.pt'))
             FIT = FITExplainer(model, generator=generator, ft_dim_last=False, activation=activation)
@@ -153,7 +152,8 @@ def run_experiment(experiment, method, trainer_type, train, train_generator, res
 
     if method == 'fit':
         attributions = get_fit_attributions(model, train_tsr_loader, test_tsr_loader, num_features,
-                                            experiment['name'], train_generator, mock_fit_generator)
+                                            experiment['name'], train_generator, mock_fit_generator,
+                                            torch.nn.Softmax(-1) if trainer_type == "FIT" else lambda x: x)
     elif method == 'grad_tsr':
         attributions = get_tsr_attributions(Saliency(model), test_tsr_loader)
     elif method == 'inverse_fit':
