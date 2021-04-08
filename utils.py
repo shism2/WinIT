@@ -78,5 +78,5 @@ def plot_calibration_curve_from_pytorch(model, test_loader, path, activation=lam
         if len(y.shape) == 2:
             y = y[:, -1]
         labels.append(y.detach().numpy())
-        preds.append(activation(model(x))[:, 1].detach().numpy())
+        preds.append(activation(model(x))[:, 1].cpu().detach().numpy())
     plot_calibration_curve(np.concatenate(preds), np.concatenate(labels), path)
