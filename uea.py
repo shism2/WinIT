@@ -17,8 +17,8 @@ def load_to_np(ds_name):
     from sktime.utils.data_io import load_from_tsfile_to_dataframe
     from sktime.utils.data_processing import from_nested_to_3d_numpy
 
-    train_x, train_y = load_from_tsfile_to_dataframe(f'{ds_name}/{ds_name}_TRAIN.ts')
-    test_x, test_y = load_from_tsfile_to_dataframe(f'{ds_name}/{ds_name}_TEST.ts')
+    train_x, train_y = load_from_tsfile_to_dataframe(f'uea_data/{ds_name}/{ds_name}_TRAIN.ts')
+    test_x, test_y = load_from_tsfile_to_dataframe(f'uea_data/{ds_name}/{ds_name}_TEST.ts')
 
     train_x = from_nested_to_3d_numpy(train_x)
     test_x = from_nested_to_3d_numpy(test_x)
@@ -45,21 +45,21 @@ def load_to_np(ds_name):
     else:
         raise Exception('Dataset name unrecognized')
 
-    np.save(f'{ds_name}/train_x.npy', train_x)
-    np.save(f'{ds_name}/train_y.npy', train_y)
-    np.save(f'{ds_name}/test_x.npy', test_x)
-    np.save(f'{ds_name}/test_y.npy', test_y)
+    np.save(f'uea_data/{ds_name}/train_x.npy', train_x)
+    np.save(f'uea_data/{ds_name}/train_y.npy', train_y)
+    np.save(f'uea_data/{ds_name}/test_x.npy', test_x)
+    np.save(f'uea_data/{ds_name}/test_y.npy', test_y)
 
 
 def load_data(ds_name, batch_size=64):
-    train_x = np.load(f'{ds_name}/train_x.npy')
-    train_y = np.load(f'{ds_name}/train_y.npy')
-    test_x = np.load(f'{ds_name}/test_x.npy')
-    test_y = np.load(f'{ds_name}/test_y.npy')
+    train_x = np.load(f'uea_data/{ds_name}/train_x.npy')
+    train_y = np.load(f'uea_data/{ds_name}/train_y.npy')
+    test_x = np.load(f'uea_data/{ds_name}/test_x.npy')
+    test_y = np.load(f'uea_data/{ds_name}/test_y.npy')
 
-    train_loader = DataLoader(TensorDataset(torch.from_numpy(train_x).float(), torch.from_numpy(train_y).long()), batch_size=batch_size)
-    test_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y).long()), batch_size=batch_size)
-    attr_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y).long()), batch_size=batch_size)
+    train_loader = DataLoader(TensorDataset(torch.from_numpy(train_x).float(), torch.from_numpy(train_y).long()), batch_size=batch_size, drop_last=True)
+    test_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y).long()), batch_size=batch_size, drop_last=True)
+    attr_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y).long()), batch_size=batch_size, drop_last=True)
 
     return train_loader, test_loader, attr_loader
 
