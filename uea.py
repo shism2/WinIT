@@ -27,6 +27,10 @@ def load_to_np(ds_name):
     train_shuffle = np.random.permutation(train_y.shape[0])
     train_x = train_x[train_shuffle]
     train_y = train_y[train_shuffle]
+
+    test_shuffle = np.random.permutation(test_y.shape[0])
+    test_x = test_x[test_shuffle]
+    test_y = test_y[test_shuffle]
     np.random.seed(0)
 
     if ds_name == 'Heartbeat':
