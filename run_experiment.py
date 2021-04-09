@@ -131,7 +131,7 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
         if train:
             train_model_rt(model=model, train_loader=train_loader, valid_loader=test_loader,
-                           optimizer=optimizer, n_epochs=5, device=device, experiment=experiment['name'])
+                           optimizer=optimizer, n_epochs=200, device=device, experiment=experiment['name'])
         else:
             model.load_state_dict(torch.load(model_path))
     elif model_type == "TCN":
@@ -372,9 +372,9 @@ if __name__ == '__main__':
     # Change these to run different experiments
     experiments = [delay_experiment(2, 50, 0, 1)]
     methods = ['fit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit']
-    model_types = ['XGB']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
-    train = False
-    train_generator = False
+    model_types = ['FIT']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
+    train = True
+    train_generator = True
     reset_metrics_file = False
 
     for i, experiment in enumerate(experiments):
