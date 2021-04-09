@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader
-from sktime.utils.data_io import load_from_tsfile_to_dataframe
-from sktime.utils.data_processing import from_nested_to_3d_numpy
 from sklearn import metrics
 import pickle as pkl
 from captum.attr import Saliency, IntegratedGradients, DeepLift
@@ -14,12 +12,22 @@ from FIT.TSX.utils import train_model as train_single_label_model
 from xgboost_model import loader_to_np
 
 
-def load_data(ds_name, batch_size=64):
+def load_to_np(ds_name):
+    # Keeping these here to avoid dependency issues
+    from sktime.utils.data_io import load_from_tsfile_to_dataframe
+    from sktime.utils.data_processing import from_nested_to_3d_numpy
+
     train_x, train_y = load_from_tsfile_to_dataframe(f'{ds_name}/{ds_name}_TRAIN.ts')
-    test_x, test_y = load_from_tsfile_to_dataframe(f'{ds_name}/{ds_name}_TRAIN.ts')
+    test_x, test_y = load_from_tsfile_to_dataframe(f'{ds_name}/{ds_name}_TEST.ts')
 
     train_x = from_nested_to_3d_numpy(train_x)
     test_x = from_nested_to_3d_numpy(test_x)
+
+    np.random.seed(0)
+    train_shuffle = np.random.permutation(train_y.shape[0])
+    train_x = train_x[train_shuffle]
+    train_y = train_y[train_shuffle]
+    np.random.seed(0)
 
     if ds_name == 'Heartbeat':
         train_y = train_y != 'normal'
@@ -33,8 +41,20 @@ def load_data(ds_name, batch_size=64):
     else:
         raise Exception('Dataset name unrecognized')
 
-    train_loader = DataLoader(TensorDataset(torch.from_numpy(train_x).float(), torch.from_numpy(train_y)), batch_size=batch_size)
-    test_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y)), batch_size=batch_size)
+    np.save(f'{ds_name}/train_x.npy', train_x)
+    np.save(f'{ds_name}/train_y.npy', train_y)
+    np.save(f'{ds_name}/test_x.npy', test_x)
+    np.save(f'{ds_name}/test_y.npy', test_y)
+
+
+def load_data(ds_name, batch_size=64):
+    train_x = np.load(f'{ds_name}/train_x.npy')
+    train_y = np.load(f'{ds_name}/train_y.npy')
+    test_x = np.load(f'{ds_name}/test_x.npy')
+    test_y = np.load(f'{ds_name}/test_y.npy')
+
+    train_loader = DataLoader(TensorDataset(torch.from_numpy(train_x).float(), torch.from_numpy(train_y).long()), batch_size=batch_size)
+    test_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y).long()), batch_size=batch_size)
     attr_loader = DataLoader(TensorDataset(torch.from_numpy(test_x).float(), torch.from_numpy(test_y).long()), batch_size=batch_size)
 
     return train_loader, test_loader, attr_loader
@@ -49,10 +69,14 @@ if __name__ == '__main__':
     window_size = 10
     top_k = 300
     skip_saliency = False
+    load_from_ts_file = False
 
     np.random.seed(0)
     torch.manual_seed(0)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    if load_from_ts_file:
+        load_to_np(dataset)
 
     train_loader, test_loader, attr_loader = load_data(dataset)
     if model == 'rnn':
