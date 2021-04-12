@@ -17,7 +17,7 @@ from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTMWithInputCellAttention import LSTMWithInputCellAttention
 from TSR.Scripts.Models.TCN import TCN
-from inverse_fit import inverse_fit_attribute
+from inverse_fit import inverse_fit_attribute, iwfit_attribute
 from xgboost_model import XGBPytorchStub
 
 
@@ -101,14 +101,27 @@ def get_inverse_fit_attributions(model, test_loader, model_type):
     return ifit_attributions
 
 
+def get_iwfit_attributions(model, test_loader, model_type, N):
+    activation = torch.nn.Softmax(-1) if model_type == "FIT" else None
+    iwfit_attributions = []
+    for x, _ in test_loader:
+        iwfit_attributions.append(iwfit_attribute(x, model, N, activation))
+
+    iwfit_attributions = [list(x) for x in zip(*iwfit_attributions)]
+    for i in range(len(iwfit_attributions)):
+        iwfit_attributions[i] = np.concatenate(iwfit_attributions[i], axis=0)
+
+    return iwfit_attributions
+
+
 def run_experiment(experiment, method, model_type, train, train_generator, reset_metrics_file=False):
-    train_samples = 500
-    test_samples = 50
+    train_samples = 1000
+    test_samples = 100
     batch_size = 10
 
     print(f"Running {experiment['name']} with {method} and trainer type {model_type}")
 
-    method_name = f"{method}_TrainerType_{model_type}"
+    method_name = f"{method}_{model_type}_model"
     model_path = f"ckpt/simulation/{experiment['name']}_0.pt" if model_type == "FIT" else f"Models/{model_type}/{experiment['name']}_BEST.pkl"
 
     num_features = experiment['num_features']
@@ -161,13 +174,14 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         attributions = get_tsr_attributions(Saliency(model), test_loader)
     elif method == 'ifit':
         attributions = get_inverse_fit_attributions(model, test_loader, model_type)
+    elif method == 'iwfit':
+        attributions = get_iwfit_attributions(model, test_loader, model_type, experiment['N'])
+        assert len(attributions) == len(test_gt)
     else:
         raise Exception(f"Method {method} unrecognized")
 
-    attributions = np.nan_to_num(attributions)
-
-    auc_score = metrics.roc_auc_score(test_gt.flatten(), attributions.flatten())
-    aupr_score = metrics.average_precision_score(test_gt.flatten(), attributions.flatten())
+    auc_score = metrics.roc_auc_score(np.concatenate(test_gt, axis=None), np.nan_to_num(np.concatenate(attributions, axis=None)))
+    aupr_score = metrics.average_precision_score(np.concatenate(test_gt, axis=None), np.nan_to_num(np.concatenate(attributions, axis=None)))
 
     result_path = f'experiment_results/{experiment["name"]}'
     plots_path = result_path + "/plots"
@@ -186,10 +200,13 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
 
     print(f"{experiment['name']}: AUC {auc_score}, AUPR {aupr_score}\n")
 
-    for i in range(10):
-        plotExampleBox(attributions[i], f'{plots_path}/{method_name}_{i}',greyScale=True)
-        plotExampleBox(test_gt[i], f'{plots_path}/gt_{i}',greyScale=True)
-        plotExampleBox(test_data[i], f'{plots_path}/data_{i}',greyScale=True)
+    if 'plot' in experiment.keys():
+        experiment['plot'](attributions, test_gt, test_data, plots_path, method_name)
+    else:
+        for i in range(10):
+            plotExampleBox(np.nan_to_num(attributions[i]), f'{plots_path}/{method_name}_{i}',greyScale=True)
+            plotExampleBox(test_gt[i], f'{plots_path}/gt_{i}',greyScale=True)
+            plotExampleBox(test_data[i], f'{plots_path}/data_{i}',greyScale=True)
 
 
 """
@@ -200,6 +217,10 @@ Experiments need
 - 'generate_sample': function(shape, label) - returns (sample, boolean importance map)
 OR
 - 'generate_data': function(num_samples, batch_size, model_type) - returns (loader, data, ground_truth_importance)
+
+Optional
+- 'N': int - Window size for windowed fit/ifit
+- 'plot': function(attributions, gt, data, plots_path, method_name) - custom plotting fn
 """
 
 
@@ -341,7 +362,7 @@ def and_experiment(num_features, num_timesteps, noise, signal):
     }
 
 
-def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1):
+def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1, carry_forward=False, N=1):
     def generate_data(num_samples, batch_size, model_type):
         assert model_type == 'FIT' or model_type == 'XGB'
         data = np.full((num_samples, num_features, num_timesteps), fill_value=noise)
@@ -353,26 +374,67 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1)
         labels = np.zeros((num_samples, num_timesteps))
         labels[:, 1 + delay_amount:num_timesteps] = np.any(data == signal, axis=1)[:, 0:num_timesteps - 1 - delay_amount]
 
-        gt_imp = data == signal
+        # TODO: Find a better way if this is too slow
+        if carry_forward:
+            for sample in range(num_samples):
+                for ts in range(num_timesteps):
+                    if labels[sample, ts]:
+                        labels[sample, ts:] = 1
+                        break
+
+        if N > 1:
+            gt_imp = []
+            for t in range(num_timesteps):
+                window_size = min(t + 1, N)
+                pred_gt = np.zeros((num_samples, num_features, window_size))
+                for sample in range(num_samples):
+                    if labels[sample, t]:
+                        pred_gt[sample, :, :] = data[sample, :, t - window_size + 1:t + 1] == signal
+                gt_imp.append(pred_gt)
+        else:
+            gt_imp = data == signal
 
         loader = DataLoader(TensorDataset(torch.from_numpy(data).float(), torch.from_numpy(labels)),
                             batch_size=batch_size)
 
         return loader, data, gt_imp
 
+    def plot(attributions, gt_imp, data, plots_path, method_name):
+        combined_attrs = np.zeros(data.shape)
+        combined_gt = np.zeros(data.shape)
+        for pred in range(len(attributions)):
+            start = pred - attributions[pred].shape[-1] + 1
+            end = pred + 1
+            combined_attrs[:, :, start:end] = np.maximum(combined_attrs[:, :, start:end], attributions[pred])
+            combined_gt[:, :, start:end] = np.maximum(combined_gt[:, :, start:end], gt_imp[pred])
+
+        for sample in range(10):
+            plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
+            plotExampleBox(np.nan_to_num(combined_attrs[sample]), f'{plots_path}/combined_{method_name}_{sample}', greyScale=True)
+            plotExampleBox(combined_gt[sample], f'{plots_path}/combined_gt_{sample}', greyScale=True)
+
+        for sample in [10]:
+            plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
+            for pred in range(len(attributions)):
+                if np.any(gt_imp[pred][sample]):
+                    plotExampleBox(np.nan_to_num(attributions[pred][sample]), f'{plots_path}/{method_name}_{sample}_pred_{pred}',greyScale=True)
+                    plotExampleBox(gt_imp[pred][sample], f'{plots_path}/gt_{sample}_pred_{pred}',greyScale=True)
+
     return {
-        'name': f'DelayExperiment_{noise}_{signal}',
+        'name': f'DelayExperiment_{noise}_{signal}{"_CarryForward" if carry_forward else ""}_N_{N}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
-        'generate_data': generate_data
+        'N': N,
+        'generate_data': generate_data,
+        'plot': plot
     }
 
 
 if __name__ == '__main__':
     # Change these to run different experiments
-    experiments = [delay_experiment(2, 50, 0, 1)]
-    methods = ['fit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit']
-    model_types = ['FIT']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
+    experiments = [delay_experiment(2, 50, 0, 1, carry_forward=True, N=10)]
+    methods = ['iwfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'iwfit']
+    model_types = ['XGB']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
     train = True
     train_generator = True
     reset_metrics_file = False
