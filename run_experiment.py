@@ -140,11 +140,11 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         if 'generate_data' in experiment.keys() else generate_data(experiment, test_samples, batch_size, model_type)
 
     if model_type == "FIT":
-        model = StateClassifier(feature_size=num_features, n_state=2, hidden_size=200, rnn='GRU')
+        model = StateClassifier(feature_size=num_features, n_state=2, hidden_size=200, rnn='LSTM')
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
         if train:
             train_model_rt(model=model, train_loader=train_loader, valid_loader=test_loader,
-                           optimizer=optimizer, n_epochs=200, device=device, experiment=experiment['name'])
+                           optimizer=optimizer, n_epochs=10, device=device, experiment=experiment['name'])
         else:
             model.load_state_dict(torch.load(model_path))
     elif model_type == "TCN":
@@ -403,6 +403,7 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
         combined_attrs = np.zeros(data.shape)
         combined_gt = np.zeros(data.shape)
         for pred in range(len(attributions)):
+            attributions[pred] = np.abs(np.nan_to_num(attributions[pred]))
             start = pred - attributions[pred].shape[-1] + 1
             end = pred + 1
             combined_attrs[:, :, start:end] = np.maximum(combined_attrs[:, :, start:end], attributions[pred])
@@ -410,15 +411,14 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
 
         for sample in range(10):
             plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
-            plotExampleBox(np.nan_to_num(combined_attrs[sample]), f'{plots_path}/combined_{method_name}_{sample}', greyScale=True)
+            plotExampleBox(combined_attrs[sample], f'{plots_path}/combined_{method_name}_{sample}', greyScale=True)
             plotExampleBox(combined_gt[sample], f'{plots_path}/combined_gt_{sample}', greyScale=True)
 
-        for sample in [10]:
+        for sample in [3]:
             plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
             for pred in range(len(attributions)):
-                if np.any(gt_imp[pred][sample]):
-                    plotExampleBox(np.nan_to_num(attributions[pred][sample]), f'{plots_path}/{method_name}_{sample}_pred_{pred}',greyScale=True)
-                    plotExampleBox(gt_imp[pred][sample], f'{plots_path}/gt_{sample}_pred_{pred}',greyScale=True)
+                plotExampleBox(attributions[pred][sample], f'{plots_path}/{method_name}_{sample}_pred_{pred}',greyScale=True)
+                plotExampleBox(gt_imp[pred][sample], f'{plots_path}/gt_{sample}_pred_{pred}',greyScale=True)
 
     return {
         'name': f'DelayExperiment_{noise}_{signal}{"_CarryForward" if carry_forward else ""}_N_{N}',
@@ -434,9 +434,9 @@ if __name__ == '__main__':
     # Change these to run different experiments
     experiments = [delay_experiment(2, 50, 0, 1, carry_forward=True, N=10)]
     methods = ['iwfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'iwfit']
-    model_types = ['XGB']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
+    model_types = ['FIT']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
     train = True
-    train_generator = True
+    train_generator = False
     reset_metrics_file = False
 
     for i, experiment in enumerate(experiments):
