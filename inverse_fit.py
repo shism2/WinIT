@@ -86,16 +86,17 @@ def iwfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_labe
     if single_label:
         scores = scores[0]
     elif collapse:
-        scores = max_collapse(scores)
+        scores = absmax_collapse(scores)
 
     return scores
 
 
-def max_collapse(attributions):
+def absmax_collapse(attributions):
     combined_attrs = np.zeros((attributions[0].shape[0], attributions[0].shape[1], len(attributions)))
     for pred in range(len(attributions)):
-        attributions[pred] = np.abs(np.nan_to_num(attributions[pred]))
+        attributions[pred] = np.nan_to_num(attributions[pred])
         start = pred - attributions[pred].shape[-1] + 1
         end = pred + 1
-        combined_attrs[:, :, start:end] = np.maximum(combined_attrs[:, :, start:end], attributions[pred])
+        combined_attrs[:, :, start:end] = np.where(np.abs(combined_attrs[:, :, start:end]) > np.abs(attributions[pred]),
+                                                   combined_attrs[:, :, start:end], attributions[pred])
     return combined_attrs

@@ -17,7 +17,7 @@ from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTMWithInputCellAttention import LSTMWithInputCellAttention
 from TSR.Scripts.Models.TCN import TCN
-from inverse_fit import inverse_fit_attribute, iwfit_attribute, max_collapse
+from inverse_fit import inverse_fit_attribute, iwfit_attribute, absmax_collapse
 from xgboost_model import XGBPytorchStub
 
 
@@ -400,8 +400,8 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
         return loader, data, gt_imp
 
     def plot(attributions, gt_imp, data, plots_path, method_name):
-        combined_attrs = max_collapse(attributions)
-        combined_gt = max_collapse(gt_imp)
+        combined_attrs = absmax_collapse(attributions)
+        combined_gt = absmax_collapse(gt_imp)
 
         for sample in range(10):
             plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
