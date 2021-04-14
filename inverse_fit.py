@@ -37,7 +37,9 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     return score.detach().numpy()
 
 
-def iwfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False):
+def iwfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False):
+    assert not single_label or not collapse
+
     if N == 1:
         return inverse_fit_attribute(x, model, activation, ft_dim_last)
 
@@ -81,4 +83,19 @@ def iwfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_labe
 
         scores.append(score.detach().numpy())
 
-    return scores[0] if single_label else scores
+    if single_label:
+        scores = scores[0]
+    elif collapse:
+        scores = max_collapse(scores)
+
+    return scores
+
+
+def max_collapse(attributions):
+    combined_attrs = np.zeros((attributions[0].shape[0], attributions[0].shape[1], len(attributions)))
+    for pred in range(len(attributions)):
+        attributions[pred] = np.abs(np.nan_to_num(attributions[pred]))
+        start = pred - attributions[pred].shape[-1] + 1
+        end = pred + 1
+        combined_attrs[:, :, start:end] = np.maximum(combined_attrs[:, :, start:end], attributions[pred])
+    return combined_attrs
