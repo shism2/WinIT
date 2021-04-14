@@ -17,7 +17,7 @@ from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTMWithInputCellAttention import LSTMWithInputCellAttention
 from TSR.Scripts.Models.TCN import TCN
-from inverse_fit import inverse_fit_attribute, iwfit_attribute, absmax_collapse
+from inverse_fit import inverse_fit_attribute, wfit_attribute, absmax_collapse
 from xgboost_model import XGBPytorchStub
 
 
@@ -101,17 +101,17 @@ def get_inverse_fit_attributions(model, test_loader, model_type):
     return ifit_attributions
 
 
-def get_iwfit_attributions(model, test_loader, model_type, N):
+def get_wfit_attributions(model, test_loader, model_type, N, inverse):
     activation = torch.nn.Softmax(-1) if model_type == "FIT" else None
-    iwfit_attributions = []
+    wfit_attributions = []
     for x, _ in test_loader:
-        iwfit_attributions.append(iwfit_attribute(x, model, N, activation))
+        wfit_attributions.append(wfit_attribute(x, model, N, activation, inverse=inverse))
 
-    iwfit_attributions = [list(x) for x in zip(*iwfit_attributions)]
-    for i in range(len(iwfit_attributions)):
-        iwfit_attributions[i] = np.concatenate(iwfit_attributions[i], axis=0)
+    wfit_attributions = [list(x) for x in zip(*wfit_attributions)]
+    for i in range(len(wfit_attributions)):
+        wfit_attributions[i] = np.concatenate(wfit_attributions[i], axis=0)
 
-    return iwfit_attributions
+    return wfit_attributions
 
 
 def run_experiment(experiment, method, model_type, train, train_generator, reset_metrics_file=False):
@@ -174,8 +174,9 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         attributions = get_tsr_attributions(Saliency(model), test_loader)
     elif method == 'ifit':
         attributions = get_inverse_fit_attributions(model, test_loader, model_type)
-    elif method == 'iwfit':
-        attributions = get_iwfit_attributions(model, test_loader, model_type, experiment['N'])
+    elif method == 'wfit' or method == 'iwfit':
+        inverse = method == 'iwfit'
+        attributions = get_wfit_attributions(model, test_loader, model_type, experiment['N'], inverse=inverse)
         assert len(attributions) == len(test_gt)
     else:
         raise Exception(f"Method {method} unrecognized")
@@ -427,8 +428,8 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
 if __name__ == '__main__':
     # Change these to run different experiments
     experiments = [delay_experiment(2, 50, 0, 1, carry_forward=True, N=10)]
-    methods = ['iwfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'iwfit']
-    model_types = ['FIT']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
+    methods = ['wfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'iwfit']
+    model_types = ['XGB']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
     train = True
     train_generator = False
     reset_metrics_file = False

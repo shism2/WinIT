@@ -37,7 +37,7 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     return score.detach().numpy()
 
 
-def iwfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False):
+def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False):
     assert not single_label or not collapse
 
     if N == 1:
@@ -67,14 +67,32 @@ def iwfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_labe
     for t in range(start, num_timesteps):
         window_size = min(t + 1, N)
         score = torch.zeros(batch_size, num_features, window_size)
+
+        if t == 0:
+            if ft_dim_last:
+                score = score.permute(0, 2, 1)
+            scores.append(score.detach().numpy())
+            continue
+
         p_y = model_predict(x[:, :, :t + 1])
+        p_tm1 = model_predict(x[:, :, :t])
 
         for n in range(window_size):
             for f in range(num_features):
                 x_hat = x[:, :, :t + 1].clone()
-                x_hat[:, f, t - n:t + 1] = x_hat[:, f, t - n - 1, None] if t > 0 else torch.mean(x)
+
+                masked_f = f if inverse else list(set(range(num_features)) - {f})
+                # Carry forward
+                x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
+
                 p_y_hat = model_predict(x_hat)
-                div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+
+                if inverse:
+                    div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+                else:
+                    div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_tm1), p_y), -1) - \
+                             torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+
                 acc_score = 2. / (1 + torch.exp(-5 * div)) - 1
                 score[:, f, window_size - n - 1] = acc_score - score[:, f, window_size - n:].sum(axis=-1) if n > 0 else acc_score
 
