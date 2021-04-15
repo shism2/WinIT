@@ -101,11 +101,18 @@ def get_inverse_fit_attributions(model, test_loader, model_type):
     return ifit_attributions
 
 
-def get_wfit_attributions(model, test_loader, model_type, N, inverse):
+def get_wfit_attributions(model, train_loader, test_loader, model_type, N, inverse, num_features, name, train):
+    generator = JointFeatureGenerator(num_features, latent_size=100, data=name)
+    if train:
+        FIT = FITExplainer(model, ft_dim_last=False)
+        FIT.fit_generator(generator, train_loader, test_loader, n_epochs=300)
+    else:
+        generator.load_state_dict(torch.load(f'ckpt/{name}/joint_generator_0.pt'))
+
     activation = torch.nn.Softmax(-1) if model_type == "FIT" else None
     wfit_attributions = []
     for x, _ in test_loader:
-        wfit_attributions.append(wfit_attribute(x, model, N, activation, inverse=inverse))
+        wfit_attributions.append(wfit_attribute(x, model, N, activation, inverse=inverse, generator=generator))
 
     wfit_attributions = [list(x) for x in zip(*wfit_attributions)]
     for i in range(len(wfit_attributions)):
@@ -176,7 +183,8 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         attributions = get_inverse_fit_attributions(model, test_loader, model_type)
     elif method == 'wfit' or method == 'iwfit':
         inverse = method == 'iwfit'
-        attributions = get_wfit_attributions(model, test_loader, model_type, experiment['N'], inverse=inverse)
+        attributions = get_wfit_attributions(model, train_loader, test_loader, model_type, experiment['N'], inverse,
+                                             num_features, experiment['name'], train_generator)
         assert len(attributions) == len(test_gt)
     else:
         raise Exception(f"Method {method} unrecognized")
@@ -388,7 +396,7 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
         if N > 1:
             gt_imp = []
             for t in range(num_timesteps):
-                window_size = min(t + 1, N)
+                window_size = min(t, N)
                 pred_gt = np.zeros((num_samples, num_features, window_size))
                 for sample in range(num_samples):
                     if labels[sample, t]:

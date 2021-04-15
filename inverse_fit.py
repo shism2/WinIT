@@ -37,7 +37,7 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     return score.detach().numpy()
 
 
-def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False):
+def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False, generator=None):
     assert not single_label or not collapse
 
     if N == 1 and inverse:
@@ -65,7 +65,7 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
     start = num_timesteps - 1 if single_label else 0
 
     for t in range(start, num_timesteps):
-        window_size = min(t + 1, N)
+        window_size = min(t, N)
         score = torch.zeros(batch_size, num_features, window_size)
 
         if t == 0:
@@ -81,9 +81,14 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
             for f in range(num_features):
                 x_hat = x[:, :, :t + 1].clone()
 
-                masked_f = f if inverse else list(set(range(num_features)) - {f})
-                # Carry forward
-                x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
+                masked_f = [f] if inverse else list(set(range(num_features)) - {f})
+                unmasked_f = [f] if not inverse else list(set(range(num_features)) - {f})
+                if generator is None:
+                    # Carry forward
+                    x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
+                else:
+                    for mask_t in range(t - n, t + 1):
+                        x_hat[:, :, mask_t], _ = generator.forward_conditional(x_hat[:, :, :mask_t].float(), x_hat[:, :, mask_t].float(), unmasked_f)
 
                 p_y_hat = model_predict(x_hat)
 
