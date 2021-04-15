@@ -40,7 +40,7 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
 def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False):
     assert not single_label or not collapse
 
-    if N == 1:
+    if N == 1 and inverse:
         return inverse_fit_attribute(x, model, activation, ft_dim_last)
 
     if isinstance(x, np.ndarray):

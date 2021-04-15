@@ -140,7 +140,7 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         if 'generate_data' in experiment.keys() else generate_data(experiment, test_samples, batch_size, model_type)
 
     if model_type == "FIT":
-        model = StateClassifier(feature_size=num_features, n_state=2, hidden_size=200, rnn='LSTM')
+        model = StateClassifier(feature_size=num_features, n_state=2, hidden_size=200, rnn='GRU')
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
         if train:
             train_model_rt(model=model, train_loader=train_loader, valid_loader=test_loader,
@@ -366,14 +366,16 @@ def and_experiment(num_features, num_timesteps, noise, signal):
 def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1, carry_forward=False, N=1):
     def generate_data(num_samples, batch_size, model_type):
         assert model_type == 'FIT' or model_type == 'XGB'
-        data = np.full((num_samples, num_features, num_timesteps), fill_value=noise)
+        data = np.random.normal(noise, 1, (num_samples, num_features, num_timesteps))
+        imp_obs = np.zeros((num_samples, num_features, num_timesteps))
         for sample in range(num_samples):
             imp_ft = np.random.randint(0, num_features)
             imp_ts = np.random.randint(0, num_timesteps)
-            data[sample, imp_ft, imp_ts] = signal
+            data[sample, imp_ft, imp_ts] += signal
+            imp_obs[sample, imp_ft, imp_ts] = 1
 
         labels = np.zeros((num_samples, num_timesteps))
-        labels[:, 1 + delay_amount:num_timesteps] = np.any(data == signal, axis=1)[:, 0:num_timesteps - 1 - delay_amount]
+        labels[:, 1 + delay_amount:num_timesteps] = np.any(imp_obs, axis=1)[:, 0:num_timesteps - 1 - delay_amount]
 
         # TODO: Find a better way if this is too slow
         if carry_forward:
@@ -390,10 +392,10 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
                 pred_gt = np.zeros((num_samples, num_features, window_size))
                 for sample in range(num_samples):
                     if labels[sample, t]:
-                        pred_gt[sample, :, :] = data[sample, :, t - window_size + 1:t + 1] == signal
+                        pred_gt[sample, :, :] = imp_obs[sample, :, t - window_size + 1:t + 1]
                 gt_imp.append(pred_gt)
         else:
-            gt_imp = data == signal
+            gt_imp = imp_obs
 
         loader = DataLoader(TensorDataset(torch.from_numpy(data).float(), torch.from_numpy(labels)),
                             batch_size=batch_size)
@@ -401,22 +403,23 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
         return loader, data, gt_imp
 
     def plot(attributions, gt_imp, data, plots_path, method_name):
-        combined_attrs = absmax_collapse(attributions)
-        combined_gt = absmax_collapse(gt_imp)
+        combined_attrs = absmax_collapse(attributions) if N > 1 else attributions
+        combined_gt = absmax_collapse(gt_imp) if N > 1 else attributions
 
         for sample in range(10):
             plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
             plotExampleBox(combined_attrs[sample], f'{plots_path}/combined_{method_name}_{sample}', greyScale=True)
             plotExampleBox(combined_gt[sample], f'{plots_path}/combined_gt_{sample}', greyScale=True)
 
-        for sample in [3]:
-            plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
-            for pred in range(len(attributions)):
-                plotExampleBox(attributions[pred][sample], f'{plots_path}/{method_name}_{sample}_pred_{pred}',greyScale=True)
-                plotExampleBox(gt_imp[pred][sample], f'{plots_path}/gt_{sample}_pred_{pred}',greyScale=True)
+        if N > 1:
+            for sample in [3]:
+                plotExampleBox(data[sample], f'{plots_path}/data_{sample}', greyScale=True)
+                for pred in range(len(attributions)):
+                    plotExampleBox(attributions[pred][sample], f'{plots_path}/{method_name}_{sample}_pred_{pred}',greyScale=True)
+                    plotExampleBox(gt_imp[pred][sample], f'{plots_path}/gt_{sample}_pred_{pred}',greyScale=True)
 
     return {
-        'name': f'DelayExperiment_{noise}_{signal}{"_CarryForward" if carry_forward else ""}_N_{N}',
+        'name': f'DelayExperiment_{noise}_{signal}{"_CarryForward" if carry_forward else ""}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
         'N': N,
@@ -427,10 +430,10 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
 
 if __name__ == '__main__':
     # Change these to run different experiments
-    experiments = [delay_experiment(2, 50, 0, 1, carry_forward=True, N=10)]
-    methods = ['wfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'iwfit']
-    model_types = ['XGB']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
-    train = True
+    experiments = [delay_experiment(2, 50, 0, 20, carry_forward=True, N=5)]
+    methods = ['iwfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'wfit', 'iwfit']
+    model_types = ['FIT']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
+    train = False
     train_generator = False
     reset_metrics_file = False
 
