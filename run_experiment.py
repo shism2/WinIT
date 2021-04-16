@@ -11,7 +11,7 @@ import timesynth as ts
 from FIT.TSX.models import StateClassifier
 from FIT.TSX.utils import train_model_rt
 from FIT.TSX.explainers import FITExplainer
-from FIT.TSX.generator import JointFeatureGenerator
+from FIT.TSX.generator import JointFeatureGenerator, FeatureGenerator, train_feature_generator
 from TSR.Scripts.Plotting.plot import plotExampleBox
 from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
@@ -102,17 +102,18 @@ def get_inverse_fit_attributions(model, test_loader, model_type):
 
 
 def get_wfit_attributions(model, train_loader, test_loader, model_type, N, inverse, num_features, name, train):
-    generator = JointFeatureGenerator(num_features, latent_size=100, data=name)
-    if train:
-        FIT = FITExplainer(model, ft_dim_last=False)
-        FIT.fit_generator(generator, train_loader, test_loader, n_epochs=300)
-    else:
-        generator.load_state_dict(torch.load(f'ckpt/{name}/joint_generator_0.pt'))
+    generators = []
+    for f in range(num_features):
+        generator = FeatureGenerator(num_features, hist=True, prediction_size=N, data=name, conditional=False)
+        if train:
+            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', feature_to_predict=f)
+        generator.load_state_dict(torch.load(f'ckpt/{name}/{f}_feature_generator.pt'))
+        generators.append(generator)
 
     activation = torch.nn.Softmax(-1) if model_type == "FIT" else None
     wfit_attributions = []
     for x, _ in test_loader:
-        wfit_attributions.append(wfit_attribute(x, model, N, activation, inverse=inverse, generator=generator))
+        wfit_attributions.append(wfit_attribute(x, model, N, activation, inverse=inverse, generators=generators))
 
     wfit_attributions = [list(x) for x in zip(*wfit_attributions)]
     for i in range(len(wfit_attributions)):
@@ -151,7 +152,7 @@ def run_experiment(experiment, method, model_type, train, train_generator, reset
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
         if train:
             train_model_rt(model=model, train_loader=train_loader, valid_loader=test_loader,
-                           optimizer=optimizer, n_epochs=10, device=device, experiment=experiment['name'])
+                           optimizer=optimizer, n_epochs=50, device=device, experiment=experiment['name'])
         else:
             model.load_state_dict(torch.load(model_path))
     elif model_type == "TCN":
@@ -371,15 +372,16 @@ def and_experiment(num_features, num_timesteps, noise, signal):
     }
 
 
-def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1, carry_forward=False, N=1):
+def delay_experiment(num_features, num_timesteps, noise, signal, generation_type, delay_amount=1, carry_forward=False, N=1):
     def generate_data(num_samples, batch_size, model_type):
         assert model_type == 'FIT' or model_type == 'XGB'
-        data = np.random.normal(noise, 1, (num_samples, num_features, num_timesteps))
+        data = np.zeros((num_samples, num_features, num_timesteps))
         imp_obs = np.zeros((num_samples, num_features, num_timesteps))
         for sample in range(num_samples):
+            data[sample] = generate_TSR_sample(num_features, num_timesteps, generation_type) + noise
             imp_ft = np.random.randint(0, num_features)
             imp_ts = np.random.randint(0, num_timesteps)
-            data[sample, imp_ft, imp_ts] += signal
+            data[sample, imp_ft, imp_ts] += signal - noise
             imp_obs[sample, imp_ft, imp_ts] = 1
 
         labels = np.zeros((num_samples, num_timesteps))
@@ -427,7 +429,7 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
                     plotExampleBox(gt_imp[pred][sample], f'{plots_path}/gt_{sample}_pred_{pred}',greyScale=True)
 
     return {
-        'name': f'DelayExperiment_{noise}_{signal}{"_CarryForward" if carry_forward else ""}',
+        'name': f'DelayExperiment_{generation_type}_{noise}_{signal}{"_CarryForward" if carry_forward else ""}',
         'num_features': num_features,
         'num_timesteps': num_timesteps,
         'N': N,
@@ -438,11 +440,12 @@ def delay_experiment(num_features, num_timesteps, noise, signal, delay_amount=1,
 
 if __name__ == '__main__':
     # Change these to run different experiments
-    experiments = [delay_experiment(2, 50, 0, 20, carry_forward=True, N=5)]
-    methods = ['iwfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'wfit', 'iwfit']
+    generation_types = ["Gaussian", "AutoRegressive", "CAR", "GaussianProcess", "Harmonic", "NARMA", "PseudoPeriodic"]
+    experiments = [delay_experiment(2, 50, 0, 10, generation_type, carry_forward=True, N=10) for generation_type in generation_types]
+    methods = ['iwfit', 'wfit']  # ['fit', 'mock_fit', 'grad_tsr', 'ifit', 'wfit', 'iwfit']
     model_types = ['FIT']  # ['FIT', 'TCN', 'LSTMWithInputCellAttention', 'XGB']
-    train = False
-    train_generator = False
+    train = True
+    train_generator = True
     reset_metrics_file = False
 
     for i, experiment in enumerate(experiments):

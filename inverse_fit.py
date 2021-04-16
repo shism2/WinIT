@@ -37,7 +37,7 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     return score.detach().numpy()
 
 
-def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False, generator=None):
+def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False, generators=None):
     assert not single_label or not collapse
 
     if N == 1 and inverse:
@@ -82,13 +82,12 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
                 x_hat = x[:, :, :t + 1].clone()
 
                 masked_f = [f] if inverse else list(set(range(num_features)) - {f})
-                unmasked_f = [f] if not inverse else list(set(range(num_features)) - {f})
-                if generator is None:
+                if generators is None:
                     # Carry forward
                     x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
                 else:
-                    for mask_t in range(t - n, t + 1):
-                        x_hat[:, :, mask_t], _ = generator.forward_conditional(x_hat[:, :, :mask_t].float(), x_hat[:, :, mask_t].float(), unmasked_f)
+                    for mask_f in masked_f:
+                        x_hat[:, mask_f, t - n:t + 1] = generators[f](x_hat[:, :, t - n:t + 1], x_hat[:, :, :t - n])[0][:, :n + 1]
 
                 p_y_hat = model_predict(x_hat)
 
