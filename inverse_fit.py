@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from FIT.TSX.generator import FeatureGenerator, train_feature_generator
+
 
 def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     if isinstance(x, np.ndarray):
@@ -87,7 +89,7 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
                     x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
                 else:
                     for mask_f in masked_f:
-                        x_hat[:, mask_f, t - n:t + 1] = generators[f](x_hat[:, :, t - n:t + 1], x_hat[:, :, :t - n])[0][:, :n + 1]
+                        x_hat[:, mask_f, t - n:t + 1] = generators[mask_f](x_hat[:, :, t - n:t + 1], x_hat[:, :, :t - n])[0][:, :n + 1]
 
                 p_y_hat = model_predict(x_hat)
 
@@ -122,3 +124,14 @@ def absmax_collapse(attributions):
         combined_attrs[:, :, start:end] = np.where(np.abs(combined_attrs[:, :, start:end]) > np.abs(attributions[pred]),
                                                    combined_attrs[:, :, start:end], attributions[pred])
     return combined_attrs
+
+
+def get_wfit_generators(train_loader, test_loader, N, name, train):
+    num_features = next(iter(train_loader))[0].shape[1]
+    generators = []
+    for f in range(num_features):
+        generator = FeatureGenerator(num_features, hist=True, prediction_size=N, data=name, conditional=False)
+        if train:
+            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', feature_to_predict=f)
+        generator.load_state_dict(torch.load(f'ckpt/{name}/{f}_feature_generator.pt'))
+        generators.append(generator)

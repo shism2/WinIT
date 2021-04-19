@@ -11,13 +11,13 @@ import timesynth as ts
 from FIT.TSX.models import StateClassifier
 from FIT.TSX.utils import train_model_rt
 from FIT.TSX.explainers import FITExplainer
-from FIT.TSX.generator import JointFeatureGenerator, FeatureGenerator, train_feature_generator
+from FIT.TSX.generator import JointFeatureGenerator
 from TSR.Scripts.Plotting.plot import plotExampleBox
 from TSR.Scripts.tsr import get_tsr_saliency
 from TSR.Scripts.train_models import train_model
 from TSR.Scripts.Models.LSTMWithInputCellAttention import LSTMWithInputCellAttention
 from TSR.Scripts.Models.TCN import TCN
-from inverse_fit import inverse_fit_attribute, wfit_attribute, absmax_collapse
+from inverse_fit import inverse_fit_attribute, wfit_attribute, absmax_collapse, get_wfit_generators
 from xgboost_model import XGBPytorchStub
 
 
@@ -102,13 +102,7 @@ def get_inverse_fit_attributions(model, test_loader, model_type):
 
 
 def get_wfit_attributions(model, train_loader, test_loader, model_type, N, inverse, num_features, name, train):
-    generators = []
-    for f in range(num_features):
-        generator = FeatureGenerator(num_features, hist=True, prediction_size=N, data=name, conditional=False)
-        if train:
-            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', feature_to_predict=f)
-        generator.load_state_dict(torch.load(f'ckpt/{name}/{f}_feature_generator.pt'))
-        generators.append(generator)
+    generators = get_wfit_generators(train_loader, test_loader, N, name, train)
 
     activation = torch.nn.Softmax(-1) if model_type == "FIT" else None
     wfit_attributions = []
