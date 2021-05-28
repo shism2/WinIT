@@ -5,6 +5,8 @@ from FIT.TSX.generator import FeatureGenerator, train_feature_generator
 
 
 def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
     if isinstance(x, np.ndarray):
         x = torch.from_numpy(x)
 
@@ -22,7 +24,7 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
         x = x.permute(0, 2, 1)
 
     batch_size, num_features, num_timesteps = x.shape
-    score = torch.zeros(x.shape)
+    score = torch.zeros(x.shape, device=device)
 
     for t in range(num_timesteps):
         p_y = model_predict(x[:, :, :t + 1])
@@ -36,11 +38,13 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     if ft_dim_last:
         score = score.permute(0, 2, 1)
 
-    return score.detach().numpy()
+    return score.detach().cpu().numpy()
 
 
-def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False, generators=None):
+def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False, generators=None, n_samples=10):
     assert not single_label or not collapse
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     if N == 1 and inverse:
         return inverse_fit_attribute(x, model, activation, ft_dim_last)
@@ -68,44 +72,67 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
 
     for t in range(start, num_timesteps):
         window_size = min(t, N)
-        score = torch.zeros(batch_size, num_features, window_size)
+        #score = torch.zeros(batch_size, num_features, window_size, device=device)
+        score = np.zeros((batch_size, num_features, window_size))
 
         if t == 0:
             if ft_dim_last:
                 score = score.permute(0, 2, 1)
-            scores.append(score.detach().numpy())
+            scores.append(score)
             continue
 
         p_y = model_predict(x[:, :, :t + 1])
         p_tm1 = model_predict(x[:, :, :t])
 
-        for n in range(window_size):
-            for f in range(num_features):
+        
+        for f in range(num_features):
+            masked_f = [f] if inverse else list(set(range(num_features)) - {f})
+            kl_div_expectations = []
+            
+            for n in range(window_size):
+                
+                # TODO: not sure if this is how we want to handle this?
+                if n > t:
+                    break
+                
                 x_hat = x[:, :, :t + 1].clone()
+                
+                div_all = []
+                for _ in range(n_samples):
+                    if generators is None:
+                        # Carry forward
+                        x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
+                    else:
+                        for mask_f in masked_f:
+                            x_hat[:, mask_f, t - n:t + 1] = generators[mask_f](x_hat[:, :, t - n:t + 1], x_hat[:, :, :t - n])[0][:, :n + 1]
 
-                masked_f = [f] if inverse else list(set(range(num_features)) - {f})
-                if generators is None:
-                    # Carry forward
-                    x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
+                    p_y_hat = model_predict(x_hat)
+
+                    if inverse:
+                        div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+                    else:
+                        div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_tm1), p_y), -1) - \
+                                 torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+                    div_all.append(div.detach().cpu().numpy())          
+                
+                E_div = np.mean(np.array(div_all), axis=0)
+                kl_div_expectations.append(E_div)
+                acc_score = 2. / (1 + np.exp(-5 * E_div)) - 1
+                if n > 0:
+                    #prev_score = score[:, f, window_size - n:].sum(axis=-1)
+                    #prev_score = score[:, f, window_size - n]
+                    score[:, f, window_size - n - 1] = acc_score - kl_div_expectations[n-1]
+                    #score[:, f, window_size - n - 1] = acc_score - prev_score
                 else:
-                    for mask_f in masked_f:
-                        x_hat[:, mask_f, t - n:t + 1] = generators[mask_f](x_hat[:, :, t - n:t + 1], x_hat[:, :, :t - n])[0][:, :n + 1]
+                    score[:, f, window_size - n - 1] = acc_score
+                #score[:, f, window_size - n - 1] = acc_score - score[:, f, window_size - n] if n > 0 else acc_score
 
-                p_y_hat = model_predict(x_hat)
-
-                if inverse:
-                    div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
-                else:
-                    div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_tm1), p_y), -1) - \
-                             torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
-
-                acc_score = 2. / (1 + torch.exp(-5 * div)) - 1
-                score[:, f, window_size - n - 1] = acc_score - score[:, f, window_size - n:].sum(axis=-1) if n > 0 else acc_score
 
         if ft_dim_last:
-            score = score.permute(0, 2, 1)
+            #score = score.permute(0, 2, 1)
+            score = np.transpose(score, (0, 2, 1))
 
-        scores.append(score.detach().numpy())
+        scores.append(score)
 
     if single_label:
         scores = scores[0]
@@ -126,12 +153,41 @@ def absmax_collapse(attributions):
     return combined_attrs
 
 
+def max_collapse(attributions):
+    combined_attrs = np.zeros((attributions[0].shape[0], attributions[0].shape[1], len(attributions)))
+    for pred in range(len(attributions)):
+        attributions[pred] = np.nan_to_num(attributions[pred])
+        start = pred - attributions[pred].shape[-1] + 1
+        end = pred + 1
+        combined_attrs[:, :, start:end] = np.where(combined_attrs[:, :, start:end] > attributions[pred],
+                                                   combined_attrs[:, :, start:end], attributions[pred])
+    return combined_attrs
+
+def mean_collapse(attributions):
+    combined_attrs = np.zeros((attributions[0].shape[0], attributions[0].shape[1], len(attributions)))
+    for pred in range(len(attributions)):
+        attributions[pred] = np.nan_to_num(attributions[pred])
+        start = pred - attributions[pred].shape[-1] + 1
+        end = pred + 1
+        combined_attrs[:, :, start:end] = np.where(np.abs(combined_attrs[:, :, start:end]) > np.abs(attributions[pred]),
+                                                   combined_attrs[:, :, start:end], attributions[pred])
+    return combined_attrs
+
 def get_wfit_generators(train_loader, test_loader, N, name, train):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
     num_features = next(iter(train_loader))[0].shape[1]
     generators = []
     for f in range(num_features):
-        generator = FeatureGenerator(num_features, hist=True, prediction_size=N, data=name, conditional=False)
+        generator = FeatureGenerator(num_features, hist=True, hidden_size=50, prediction_size=N, data=name, conditional=False)
         if train:
-            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', feature_to_predict=f)
+            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', n_epochs=300,  feature_to_predict=f)
         generator.load_state_dict(torch.load(f'ckpt/{name}/{f}_feature_generator.pt'))
+        generator.to(device)
         generators.append(generator)
+    
+    return generators
+
+        
+        
+        
