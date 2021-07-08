@@ -8,3 +8,8 @@ data
 output
 outputs
 plots
+.ipynb_checkpoints/
+__pycache__/
+experiment_results/
+logs/
+uea_data/

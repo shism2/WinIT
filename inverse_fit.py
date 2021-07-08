@@ -41,13 +41,13 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     return score.detach().cpu().numpy()
 
 
-def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=False, inverse=False, generators=None, n_samples=10):
+def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse="max", inverse=False, generators=None, n_samples=10, cv=0):
     assert not single_label or not collapse
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    if N == 1 and inverse:
-        return inverse_fit_attribute(x, model, activation, ft_dim_last)
+    #if N == 1 and inverse:
+    #    return inverse_fit_attribute(x, model, activation, ft_dim_last)
 
     if isinstance(x, np.ndarray):
         x = torch.from_numpy(x)
@@ -84,21 +84,24 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
         p_y = model_predict(x[:, :, :t + 1])
         p_tm1 = model_predict(x[:, :, :t])
 
-        
         for f in range(num_features):
             masked_f = [f] if inverse else list(set(range(num_features)) - {f})
             kl_div_expectations = []
-            
+            kl_div_temporal_expectations = []
+            kl_div_unexplained_expectations = []
+
             for n in range(window_size):
-                
-                # TODO: not sure if this is how we want to handle this?
-                if n > t:
-                    break
-                
+                #print("Trace: ", t, f, n, window_size)
                 x_hat = x[:, :, :t + 1].clone()
+                if not inverse:
+                    p_tmn = model_predict(x[:, :, :t-n])
+                    temporal_difference = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_tmn), p_y), -1)
+                    kl_div_temporal_expectations.append(temporal_difference.detach().cpu().numpy())
                 
                 div_all = []
+                div_unexplained = []
                 for _ in range(n_samples):
+                    
                     if generators is None:
                         # Carry forward
                         x_hat[:, masked_f, t - n:t + 1] = x_hat[:, masked_f, t - n - 1, None]
@@ -111,18 +114,31 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
                     if inverse:
                         div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
                     else:
-                        div = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_tm1), p_y), -1) - \
-                                 torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+                        unexplained_difference = torch.sum(torch.nn.KLDivLoss(reduction='none')(torch.log(p_y_hat), p_y), -1)
+                        div = temporal_difference - unexplained_difference
+                        div_unexplained.append(unexplained_difference.detach().cpu().numpy())
+
                     div_all.append(div.detach().cpu().numpy())          
-                
+ 
                 E_div = np.mean(np.array(div_all), axis=0)
                 kl_div_expectations.append(E_div)
+                kl_div_unexplained_expectations.append(np.mean(np.array(div_unexplained), axis=0))
+                
                 acc_score = 2. / (1 + np.exp(-5 * E_div)) - 1
                 if n > 0:
-                    #prev_score = score[:, f, window_size - n:].sum(axis=-1)
-                    #prev_score = score[:, f, window_size - n]
-                    score[:, f, window_size - n - 1] = acc_score - kl_div_expectations[n-1]
-                    #score[:, f, window_size - n - 1] = acc_score - prev_score
+                    if inverse:
+                        kl = 2. / (1 + np.exp(-5 * kl_div_expectations[n-1])) - 1
+                        score[:, f, window_size - n - 1] = acc_score - kl # - kl_div_expectations[n-1]
+                    else:
+                        prev_score = score[:, f, window_size - n]
+                        #prev_score = score[:, f, window_size - n:].sum(axis=-1)
+                        #E_div = (kl_div_temporal_expectations[n] - kl_div_temporal_expectations[n-1]) - (kl_div_unexplained_expectations[n] - kl_div_unexplained_expectations[n-1])
+                        #E_div = (kl_div_temporal_expectations[n]) - (kl_div_unexplained_expectations[n] - kl_div_unexplained_expectations[n-1])
+                        #acc_score =  2. / (1 + np.exp(-5 * E_div)) - 1
+                        #unexplained = 2. / (1 + np.exp(-5 * )) - 1
+                        #score[:, f, window_size - n - 1] = acc_score # - prev_score
+                        score[:, f, window_size - n - 1] = acc_score - prev_score
+
                 else:
                     score[:, f, window_size - n - 1] = acc_score
                 #score[:, f, window_size - n - 1] = acc_score - score[:, f, window_size - n] if n > 0 else acc_score
@@ -136,7 +152,9 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
 
     if single_label:
         scores = scores[0]
-    elif collapse:
+    elif collapse == "max":
+        scores = max_collapse(scores)
+    elif collapse == "absmax":
         scores = absmax_collapse(scores)
 
     return scores
@@ -173,7 +191,7 @@ def mean_collapse(attributions):
                                                    combined_attrs[:, :, start:end], attributions[pred])
     return combined_attrs
 
-def get_wfit_generators(train_loader, test_loader, N, name, train):
+def get_wfit_generators(train_loader, test_loader, N, name, train, cv=0):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     num_features = next(iter(train_loader))[0].shape[1]
@@ -181,8 +199,8 @@ def get_wfit_generators(train_loader, test_loader, N, name, train):
     for f in range(num_features):
         generator = FeatureGenerator(num_features, hist=True, hidden_size=50, prediction_size=N, data=name, conditional=False)
         if train:
-            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', n_epochs=300,  feature_to_predict=f)
-        generator.load_state_dict(torch.load(f'ckpt/{name}/{f}_feature_generator.pt'))
+            train_feature_generator(generator, train_loader, test_loader, 'feature_generator', n_epochs=300,  feature_to_predict=f, cv=cv)
+        generator.load_state_dict(torch.load(f'ckpt/{name}/{f}_feature_generator_{cv}.pt'))
         generator.to(device)
         generators.append(generator)
     
