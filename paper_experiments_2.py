@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
                 start = time.process_time()
 
-                #run_baseline(**args)
+                run_baseline(**args)
 
                 end = time.process_time()
                 time_elapsed = end - start
@@ -62,7 +62,7 @@ if __name__ == '__main__':
 
                 start = time.process_time()
 
-                #run_baseline(**args)
+                run_baseline(**args)
 
                 end = time.process_time()
                 time_elapsed = end - start
