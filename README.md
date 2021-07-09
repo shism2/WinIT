@@ -1,99 +1,51 @@
 # tsi-research
 Time Series Interpretability Research
 
-Generate spike comparison:
-```
-python -m FIT.evaluation.baselines --data simulation_spike --explainer ifit --train_gen --N 10 --delay 0 --train
-```
-Results:
-```
-Saving file to  ./output//simulation_spike/ifit_test_importance_scores_0.pkl
------------------------------------------------
-Important features within each timestep metrics
-Ranked accuracy: 0.935672514619883
-Imp ft at least 1 std > than unimp ft: 0.9005847953216374
-KL div between imp ft and unimp ft in imp ts: inf
------------------------------------------------
-auc: 0.9270861324561059  aupr: 0.2664588488268385
-```
+## Environment
 
-# Test:
-Time delay = 2
-Windows = [1, 2, 4, 8, 16]
+This requires:
+- Python 3.7
+- Anaconda
+- (GPU) CUDA 10.1
 
-evals = [[0.5315586944617352, 0.0010457909597314484],
-        [],
-        [],
-        [],
-        []]
+Tested on Ubuntu 18.04.
 
-Time delay = 4
-Windows = [1, 2, 4, 8, 16]
+### Anaconda
 
-
-# Recording
+Install the individual edition:
 
 ```
-time python -m FIT.evaluation.baselines --data simulation_spike --explainer ifit --train_gen --N 2 --delay 2 --train --cv 1
-
------------------------------------------------
-Important features within each timestep metrics
-Ranked accuracy: 0.9166666666666666
-Imp ft at least 1 std > than unimp ft: 0.21153846153846154
-KL div between imp ft and unimp ft in imp ts: inf
------------------------------------------------
-auc: 0.908414671449626  aupr: 0.008165649188572025
-
-real    3m3.373s
-user    33m31.012s
-sys     0m36.947s
-```
-```
-time python -m FIT.evaluation.baselines --data simulation_spike --explainer ifit --train_gen --N 2 --delay 2 --train --cv 2
-
------------------------------------------------
-Important features within each timestep metrics
-Ranked accuracy: 0.9358974358974359
-Imp ft at least 1 std > than unimp ft: 0.9358974358974359
-KL div between imp ft and unimp ft in imp ts: inf
------------------------------------------------
-auc: 0.9584807063064761  aupr: 0.6466087566541691
-
-real    3m7.271s
-user    34m20.948s
-sys     0m38.593s
+wget https://repo.anaconda.com/archive/Anaconda3-2021.05-Linux-x86_64.sh
+chmod +x Anaconda3-2021.05-Linux-x86_64.sh
+./Anaconda3-2021.05-Linux-x86_64.sh
 ```
 
-```
-time python -m FIT.evaluation.baselines --data simulation_spike --explainer ifit --train_gen --N 2 --delay 2 --train --cv 3
+Restart your shell after installing so that you are using the base conda environment.
 
------------------------------------------------
-Important features within each timestep metrics
-Ranked accuracy: 0.8717948717948718
-Imp ft at least 1 std > than unimp ft: 0.391025641025641
-KL div between imp ft and unimp ft in imp ts: inf
------------------------------------------------
-auc: 0.778824250666142  aupr: 0.026271528329866144
-
-real    2m28.111s
-user    32m40.002s
-sys     0m36.312s
-```
+### Setup Conda Environment
 
 ```
-time python -m FIT.evaluation.baselines --data simulation_spike --explainer ifit --train_gen --N 2 --delay 2 --train --cv 4
-
------------------------------------------------
-Important features within each timestep metrics
-Ranked accuracy: 0.9102564102564102
-Imp ft at least 1 std > than unimp ft: 0.4230769230769231
-KL div between imp ft and unimp ft in imp ts: 0.22519961594744067
------------------------------------------------
-auc: 0.9303699689977533  aupr: 0.01973027072324309
-
-real    3m15.925s
-user    33m31.230s
-sys     0m36.372s
+conda env create -f environment.yml
 ```
 
-AUROC (Explanation)
+# Run paper experiments
+
+## Generate synthetic datasets
+
+Generate spike datasets:
+
+```
+python -m FIT.data_generator.simulations_threshold_spikes
+```
+
+This will generate five datasets and store them in `data/`:
+ - The original spike dataset (`data/simulated_spike_data`)
+ - Four spike datasets with delays of 1 through 4 (`data/simulated_spike_data_delay_X`).
+ 
+## Run benchmarks
+
+```
+python paper_experiments_2.py
+```
+
+And will store the results in the csv file specified at the beginning of the script.
