@@ -41,7 +41,7 @@ def inverse_fit_attribute(x, model, activation=None, ft_dim_last=False):
     return score.detach().cpu().numpy()
 
 
-def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse="max", inverse=False, generators=None, n_samples=10, cv=0):
+def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label=False, collapse=True, inverse=False, generators=None, n_samples=10, cv=0):
     assert not single_label or not collapse
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -150,11 +150,11 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
 
         scores.append(score)
 
+
     if single_label:
         scores = scores[0]
-    elif collapse == "max":
-        scores = max_collapse(scores)
-    elif collapse == "absmax":
+    elif collapse:
+        #scores = max_collapse(scores)
         scores = absmax_collapse(scores)
 
     return scores

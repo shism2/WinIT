@@ -1,6 +1,6 @@
 [submodule "TS-Interpretability-Benchmark"]
 	path = TSR
-	url = git@github.com:cjrooke/TS-Interpretability-Benchmark.git
+        url = https://github.com/cjrooke/TS-Interpretability-Benchmark.git
 [submodule "time_series_explainability"]
 	path = FIT
-	url = git@github.com:cjrooke/time_series_explainability.git
+	url = https://github.com/jajsmith/time_series_explainability.git 

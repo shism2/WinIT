@@ -12,17 +12,17 @@ import torch
 from FIT.evaluation.baselines import run_baseline
 
 if __name__ == '__main__':
-    explainers = ["fit"]
-    windows = [2,8]
-    delays = [0]
+    explainers = ["fit", "ifit"]
+    windows = [1, 2, 8]
+    delays = [0, 2]
     cvs = list(range(5))
     #samples = [1, 4, 8]
-    log_file = 'paper_experiments_10_just_max.csv'
+    log_file = 'paper_experiments_11_max.csv'
     #data = "simulation_spike"
     #data = "simulation" #(state)
     data = "simulation_spike" #(switch-feature)
 
-    all_trained = True
+    all_trained = False 
     if not all_trained:
         for delay in delays:
             for cv in cvs:
@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
                 start = time.process_time()
 
-                run_baseline(**args)
+                #run_baseline(**args)
 
                 end = time.process_time()
                 time_elapsed = end - start
@@ -62,7 +62,7 @@ if __name__ == '__main__':
 
                 start = time.process_time()
 
-                run_baseline(**args)
+                #run_baseline(**args)
 
                 end = time.process_time()
                 time_elapsed = end - start
