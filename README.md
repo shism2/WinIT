@@ -1,5 +1,6 @@
-# tsi-research
-Time Series Interpretability Research
+# WinIT
+
+Code for paper "Temporal Dependencies in Feature Importance for Time Series Predictions" presented at the [ICML 2021 Time Series Workshop](http://roseyu.com/time-series-workshop/)
 
 After cloning make sure to initialize the git submodules by using:
 ```
