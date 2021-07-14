@@ -8,16 +8,17 @@ import numpy as np
 import pandas as pd
 import torch
 
+from datetime import datetime
 
 from FIT.evaluation.baselines import run_baseline
 
 if __name__ == '__main__':
-    explainers = ["fit", "ifit"]
-    windows = [1, 2, 8]
-    delays = [0, 2]
-    cvs = list(range(5))
+    explainers = ["fit","ifit"]
+    windows = [1,8]
+    delays = [0,2]
+    cvs = [0,1,2,3,4] #list(range(5))
     #samples = [1, 4, 8]
-    log_file = 'paper_experiments_11_max.csv'
+    log_file = 'paper_experiments.csv'
     #data = "simulation_spike"
     #data = "simulation" #(state)
     data = "simulation_spike" #(switch-feature)
@@ -97,7 +98,7 @@ if __name__ == '__main__':
     print("Evaluating Explanations")
     print("=====")
     
-    header = ['data', 'target_delay', 'cv', 'explainer', 'window', 'samples', 'auc', 'auprc', 'runtime']
+    header = ['data', 'target_delay', 'cv', 'explainer', 'window', 'samples', 'auc', 'auprc', 'runtime', 'experiment_time']
     with open(log_file, 'w', encoding='UTF8') as f:
         writer = csv.writer(f)
         writer.writerow(header)
@@ -131,7 +132,7 @@ if __name__ == '__main__':
                     time_elapsed = end - start
 
                     print(f"Explanation: [{auc:.3f}, {auprc:.3f}, {time_elapsed:.2f}]")
-                    row = [args['data'], args['delay'], args['cv'], args['explainer_name'], args['N'], args["samples"], auc, auprc, time_elapsed]
+                    row = [args['data'], args['delay'], args['cv'], args['explainer_name'], args['N'], args["samples"], auc, auprc, time_elapsed, str(datetime.now())]
 
                     # Write out results to log
                     with open(log_file, 'a', encoding='UTF8') as f:

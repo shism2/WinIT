@@ -1,6 +1,12 @@
 # tsi-research
 Time Series Interpretability Research
 
+After cloning make sure to initialize the git submodules by using:
+```
+git submodule init
+git submodule update
+```
+
 ## Environment
 
 This requires:
@@ -45,7 +51,7 @@ This will generate five datasets and store them in `data/`:
 ## Run benchmarks
 
 ```
-python paper_experiments_2.py
+python experiments.py
 ```
 
 And will store the results in the csv file specified at the beginning of the script.

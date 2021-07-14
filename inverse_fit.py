@@ -132,12 +132,13 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
                     else:
                         prev_score = score[:, f, window_size - n]
                         #prev_score = score[:, f, window_size - n:].sum(axis=-1)
-                        #E_div = (kl_div_temporal_expectations[n] - kl_div_temporal_expectations[n-1]) - (kl_div_unexplained_expectations[n] - kl_div_unexplained_expectations[n-1])
+                        E_div = (kl_div_temporal_expectations[n] - kl_div_temporal_expectations[n-1]) - (kl_div_unexplained_expectations[n] - kl_div_unexplained_expectations[n-1])
+                        #E_div = (kl_div_temporal_expectations[n] - kl_div_temporal_expectations[n-1]) - kl_div_unexplained_expectations[n]
                         #E_div = (kl_div_temporal_expectations[n]) - (kl_div_unexplained_expectations[n] - kl_div_unexplained_expectations[n-1])
-                        #acc_score =  2. / (1 + np.exp(-5 * E_div)) - 1
+                        acc_score =  2. / (1 + np.exp(-5 * E_div)) - 1
                         #unexplained = 2. / (1 + np.exp(-5 * )) - 1
-                        #score[:, f, window_size - n - 1] = acc_score # - prev_score
-                        score[:, f, window_size - n - 1] = acc_score - prev_score
+                        score[:, f, window_size - n - 1] = acc_score
+                        #score[:, f, window_size - n - 1] = acc_score - prev_score
 
                 else:
                     score[:, f, window_size - n - 1] = acc_score
@@ -156,6 +157,7 @@ def wfit_attribute(x, model, N, activation=None, ft_dim_last=False, single_label
     elif collapse:
         #scores = max_collapse(scores)
         scores = absmax_collapse(scores)
+        #scores = mean_collapse(scores)
 
     return scores
 
