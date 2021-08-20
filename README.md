@@ -32,7 +32,7 @@ Restart your shell after installing so that you are using the base conda environ
 ### Setup Conda Environment
 
 ```
-conda env create -f environment.yml
+conda env create -f linux_environment.yml
 ```
 
 # Run paper experiments
